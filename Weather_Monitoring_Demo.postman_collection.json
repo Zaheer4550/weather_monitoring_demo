@@ -22,7 +22,8 @@
 									"    pm.response.to.have.status(200);",
 									"});",
 									"",
-										],
+									""
+								],
 								"type": "text/javascript",
 								"packages": {}
 							}
