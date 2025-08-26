@@ -15,10 +15,11 @@ jobs:
       - name: Login to Postman CLI
         run: postman login --with-api-key ${{ secrets.POSTMAN_API_KEY }}
 
-      # Run your collection directly from the repo (no environment)
+      # Run your collection with CSV data file
       - name: Run Postman Collection
         run: |
           postman collection run Weather_Monitoring_Demo.postman_collection.json \
+            --iteration-data weather_all.csv \
             --reporters cli,json --reporter-json-export run_results.json
 
       - name: Check Run Results
