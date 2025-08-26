@@ -24,8 +24,21 @@ jobs:
             -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
             -o monitor_results.json
 
+      - name: Check Monitor Run Results
+        run: |
+          echo "Monitor run completed. Checking for failures..."
+          FAILED=$(jq '.run.stats.assertions.failed' monitor_results.json)
+          echo "Failed assertions: $FAILED"
+          if [ "$FAILED" -gt 0 ]; then
+            echo "❌ Monitor run failed with $FAILED failed tests."
+            exit 1
+          else
+            echo "✅ All tests passed."
+          fi
+
       - name: Upload Monitor Run Results
         uses: actions/upload-artifact@v4
+        if: always() # still upload results even if tests fail
         with:
           name: postman-monitor-results
           path: monitor_results.json
