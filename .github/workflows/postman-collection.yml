@@ -18,9 +18,9 @@ jobs:
       - name: Debug – list repo files
         run: ls -R
 
-      - name: Trigger Postman Monitor
+      - name: Get list of Postman Monitors
         run: |
-          curl -X POST https://api.getpostman.com/monitors/${{ secrets.MONITOR_ID }}/run \
+          curl -s -X GET https://api.getpostman.com/monitors \
             -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
             -o monitor_results.json
 
