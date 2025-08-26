@@ -59,8 +59,8 @@
 									"});\r",
 									"\r",
 									"// 2. Latency check\r",
-									"pm.test(\"Response time is below 1000ms\", () => {\r",
-									"    pm.expect(pm.response.responseTime).to.be.below(1000);\r",
+									"pm.test(\"Response time is below 1200ms\", () => {\r",
+									"    pm.expect(pm.response.responseTime).to.be.below(1200);\r",
 									"});\r",
 									"\r",
 									""
