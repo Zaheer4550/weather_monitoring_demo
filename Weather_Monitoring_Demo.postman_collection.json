@@ -1,0 +1,167 @@
+{
+	"info": {
+		"_postman_id": "78f76b34-b27f-41f8-bbfc-9c3cd081b6d5",
+		"name": "Weather_Monitoring_Demo",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "45974783",
+		"_collection_link": "https://postvehicle-enterprise-team-3244bd21-b4e1-4b1f-98bf-ef9e4de6.postman.co/workspace/student-5-workspace~2b1f8c87-7673-430b-93d9-4f732c44ce25/collection/45974783-78f76b34-b27f-41f8-bbfc-9c3cd081b6d5?action=share&source=collection_link&creator=45974783"
+	},
+	"item": [
+		{
+			"name": "Current Weather (India)",
+			"item": [
+				{
+					"name": "Get Current Weather",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// 1. Check HTTP status",
+									"pm.test(\"Status code is 200\", () => {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"// Latency validation ",
+									"pm.test(\"Response time is below 1200ms\", () => {",
+									"    pm.expect(pm.response.responseTime).to.be.below(1200);",
+									"});",
+									"",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_url}}",
+							"host": [
+								"{{api_url}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Daily Forecast (US)",
+			"item": [
+				{
+					"name": "Get Daily Forecast",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// 1. Status code validation\r",
+									"pm.test(\"Status code is 200\", () => {\r",
+									"    pm.response.to.have.status(200);\r",
+									"});\r",
+									"\r",
+									"// 2. Latency check\r",
+									"pm.test(\"Response time is below 1000ms\", () => {\r",
+									"    pm.expect(pm.response.responseTime).to.be.below(1000);\r",
+									"});\r",
+									"\r",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_url}}",
+							"host": [
+								"{{api_url}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Historical Data (UK)",
+			"item": [
+				{
+					"name": "Get Historical Data",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Status code validation\r",
+									"pm.test(\"Status code is 200\", () => {\r",
+									"    pm.response.to.have.status(200);\r",
+									"});\r",
+									"\r",
+									"// Latency validation \r",
+									"pm.test(\"Response time is below 1000ms\", () => {\r",
+									"    pm.expect(pm.response.responseTime).to.be.below(1000);\r",
+									"});\r",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{api_url}}",
+							"host": [
+								"{{api_url}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					"let row = pm.iterationData.toObject();\r",
+					"let apiType = row.api_type;\r",
+					"\r",
+					"if (apiType === \"current\") {\r",
+					"    pm.environment.set(\"api_url\", `https://api.open-meteo.com/v1/forecast?latitude=${row.latitude}&longitude=${row.longitude}&current_weather=true`);\r",
+					"}\r",
+					"else if (apiType === \"forecast\") {\r",
+					"    pm.environment.set(\"api_url\", `https://api.open-meteo.com/v1/forecast?latitude=${row.latitude}&longitude=${row.longitude}&daily=temperature_2m_max,temperature_2m_min&timezone=${row.timezone}`);\r",
+					"}\r",
+					"else if (apiType === \"historical\") {\r",
+					"    pm.environment.set(\"api_url\", `https://archive-api.open-meteo.com/v1/archive?latitude=${row.latitude}&longitude=${row.longitude}&start_date=${row.start_date}&end_date=${row.end_date}&daily=temperature_2m_max,temperature_2m_min&timezone=auto`);\r",
+					"}\r",
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	]
+}
