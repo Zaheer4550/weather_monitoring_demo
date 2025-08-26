@@ -46,8 +46,10 @@ jobs:
       # Sync the updated collection into Postman workspace
       - name: Sync Collection to Postman
         run: |
-          postman collection upload Weather_Monitoring_Demo.postman_collection.json \
-            --workspace ${{ secrets.POSTMAN_WORKSPACE_ID }}
+          curl -X PUT "https://api.getpostman.com/collections/${{ secrets.POSTMAN_COLLECTION_ID }}" \
+            -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d @Weather_Monitoring_Demo.postman_collection.json
 
       # Fetch latest monitor run results from Postman
       - name: Fetch Monitor Run Results
