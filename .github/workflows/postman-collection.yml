@@ -15,11 +15,10 @@ jobs:
       - name: Login to Postman CLI
         run: postman login --with-api-key ${{ secrets.POSTMAN_API_KEY }}
 
-      # Run your collection directly from the repo
+      # Run your collection directly from the repo (no environment)
       - name: Run Postman Collection
         run: |
-          postman collection run <path-to-your-collection.json> \
-            --environment <path-to-your-environment.json> \
+          postman collection run Weather_Monitoring_Demo.postman_collection.json \
             --reporters cli,json --reporter-json-export run_results.json
 
       - name: Check Run Results
@@ -46,7 +45,7 @@ jobs:
       # Sync the updated collection into Postman workspace
       - name: Sync Collection to Postman
         run: |
-          postman collection upload <path-to-your-collection.json> \
+          postman collection upload Weather_Monitoring_Demo.postman_collection.json \
             --workspace ${{ secrets.POSTMAN_WORKSPACE_ID }}
 
       # Fetch latest monitor run results from Postman
