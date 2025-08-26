@@ -18,18 +18,14 @@ jobs:
       - name: Debug – list repo files
         run: ls -R
 
-      - name: Run API tests with CSV data
+      - name: Trigger Postman Monitor
         run: |
-          postman collection run "45974783-d8ab60de-5a24-4d04-89ec-5b7ce95c2188" \
-            --iteration-data tests/weather_all.csv \
-            --reporters cli,json,html \
-            --reporter-json-export results.json \
-            --reporter-html-export results.html
+          curl -X POST https://api.getpostman.com/monitors/${{ secrets.MONITOR_ID }}/run \
+            -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
+            -o monitor_results.json
 
-      - name: Upload Test Results (JSON & HTML)
+      - name: Upload Monitor Run Results
         uses: actions/upload-artifact@v4
         with:
-          name: postman-test-results
-          path: |
-            results.json
-            results.html
+          name: postman-monitor-results
+          path: monitor_results.json
