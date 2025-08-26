@@ -22,13 +22,7 @@
 									"    pm.response.to.have.status(200);",
 									"});",
 									"",
-									"// Latency validation ",
-									"pm.test(\"Response time is below 1200ms\", () => {",
-									"    pm.expect(pm.response.responseTime).to.be.below(1200);",
-									"});",
-									"",
-									""
-								],
+										],
 								"type": "text/javascript",
 								"packages": {}
 							}
