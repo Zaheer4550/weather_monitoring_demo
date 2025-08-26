@@ -15,30 +15,54 @@ jobs:
       - name: Login to Postman CLI
         run: postman login --with-api-key ${{ secrets.POSTMAN_API_KEY }}
 
-      - name: Debug – list repo files
-        run: ls -R
-
-      - name: Trigger Postman Monitor
+      # Run your collection directly from the repo
+      - name: Run Postman Collection
         run: |
-          curl -s -X POST https://api.getpostman.com/monitors/1f082462-b83b-49a0-8929-adaedc6384bb/run \
-            -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
-            -o monitor_results.json
+          postman collection run <path-to-your-collection.json> \
+            --environment <path-to-your-environment.json> \
+            --reporters cli,json --reporter-json-export run_results.json
 
-      - name: Check Monitor Run Results
+      - name: Check Run Results
         run: |
-          echo "Monitor run completed. Checking for failures..."
-          FAILED=$(jq '.run.stats.assertions.failed' monitor_results.json)
-          echo "Failed assertions: $FAILED"
+          TOTAL=$(jq '.run.stats.assertions.total' run_results.json)
+          FAILED=$(jq '.run.stats.assertions.failed' run_results.json)
+          PASSED=$((TOTAL - FAILED))
+
+          echo "===================="
+          echo "   Postman Results  "
+          echo "===================="
+          echo "✅ Passed: $PASSED"
+          echo "❌ Failed: $FAILED"
+          echo "📊 Total : $TOTAL"
+          echo "===================="
+
           if [ "$FAILED" -gt 0 ]; then
-            echo "❌ Monitor run failed with $FAILED failed tests."
+            echo "❌ Tests failed."
             exit 1
           else
             echo "✅ All tests passed."
           fi
 
-      - name: Upload Monitor Run Results
+      # Sync the updated collection into Postman workspace
+      - name: Sync Collection to Postman
+        run: |
+          postman collection upload <path-to-your-collection.json> \
+            --workspace ${{ secrets.POSTMAN_WORKSPACE_ID }}
+
+      # Fetch latest monitor run results from Postman
+      - name: Fetch Monitor Run Results
+        run: |
+          curl -s -X GET "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/runs" \
+            -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
+            -o monitor_results.json
+
+          echo "Latest monitor run results downloaded."
+
+      - name: Upload Run Results
         uses: actions/upload-artifact@v4
-        if: always() # still upload results even if tests fail
+        if: always()
         with:
-          name: postman-monitor-results
-          path: monitor_results.json
+          name: postman-run-results
+          path: |
+            run_results.json
+            monitor_results.json
