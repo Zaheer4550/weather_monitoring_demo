@@ -21,7 +21,15 @@ jobs:
       - name: Run API tests with CSV data
         run: |
           postman collection run "45974783-d8ab60de-5a24-4d04-89ec-5b7ce95c2188" \
-            --iteration-data weather_all.csv \
-            --reporters cli,json \
-            --reporter-json-export results.json
+            --iteration-data tests/weather_all.csv \
+            --reporters cli,json,html \
+            --reporter-json-export results.json \
+            --reporter-html-export results.html
 
+      - name: Upload Test Results (JSON & HTML)
+        uses: actions/upload-artifact@v4
+        with:
+          name: postman-test-results
+          path: |
+            results.json
+            results.html
