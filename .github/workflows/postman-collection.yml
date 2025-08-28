@@ -31,16 +31,16 @@ jobs:
           echo "===================="
           echo "   Postman CLI Results  "
           echo "===================="
-          echo "✅ Passed: $PASSED"
-          echo "❌ Failed: $FAILED"
-          echo "📊 Total : $TOTAL"
+          echo "Passed: $PASSED"
+          echo "Failed: $FAILED"
+          echo "Total : $TOTAL"
           echo "===================="
 
           if [ "$FAILED" -gt 0 ]; then
-            echo "❌ Collection tests failed."
+            echo "Collection tests failed."
             exit 1
           else
-            echo "✅ All collection tests passed."
+            echo "All collection tests passed."
           fi
 
       # Sync the updated collection into Postman workspace
