@@ -1,31 +1,102 @@
-name: Automated API tests using Postman CLI
- 
-on: push
- 
+name: Run 3 Postman collections + trigger monitors
+
+on:
+  push:
+  workflow_dispatch:
+
 jobs:
-  automated-api-tests:
+  run-and-monitor:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        suite:
+          - name: current-weather
+            collection: "Get Current Weather_A.postman_collection.json"
+            data:       "current_weather_cities.csv"
+            monitor_uid: "45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f"
+          - name: daily-forecast
+            collection: "Get Daily Forecast- B.postman_collection.json"
+            data:       "Forecast_cities.csv"
+            monitor_uid: "45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6"
+          - name: historical-data
+            collection: "Get Historical Data- C.postman_collection.json"
+            data:       "Historical_cities.csv"
+            monitor_uid: "45974783-1f084d7b-f131-47e0-b084-7926fd355a25"
+
     steps:
       - uses: actions/checkout@v4
- 
-      - name: Install Postman CLI
+
+      - name: Install Node & Newman
         run: |
-          curl -o- "https://dl-cli.pstmn.io/install/linux64.sh" | sh
- 
-      - name: Login to Postman CLI
-        run: postman login --with-api-key ${{ secrets.POSTMAN_API_KEY }}
- 
-      - name: Debug – list repo files
-        run: ls -R
- 
-      - name: Get list of Postman Monitors
+          sudo apt-get update -y
+          sudo apt-get install -y nodejs npm jq
+          npm i -g newman newman-reporter-htmlextra
+
+      - name: Run ${{ matrix.suite.name }} via Newman (HTML + JUnit + JSON)
         run: |
-          curl -s -X GET https://api.getpostman.com/monitors \
-            -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
-            -o monitor_results.json
- 
-      - name: Upload Monitor Run Results
+          mkdir -p reports/${{ matrix.suite.name }}
+          newman run "${{ matrix.suite.collection }}" \
+            -d "${{ matrix.suite.data }}" \
+            --reporters cli,htmlextra,json,junit \
+            --reporter-htmlextra-export "reports/${{ matrix.suite.name }}/report.html" \
+            --reporter-json-export       "reports/${{ matrix.suite.name }}/report.json" \
+            --reporter-junit-export      "reports/${{ matrix.suite.name }}/report.junit.xml" \
+            --delay-request 250
+
+      - name: Trigger cloud monitor and fetch latest result
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          # kick the monitor
+          curl -s -X POST \
+            "https://api.getpostman.com/monitors/${{ matrix.suite.monitor_uid }}/run" \
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -o "reports/${{ matrix.suite.name }}/monitor_kick.json"
+
+          # brief wait, then capture latest result JSON
+          sleep 20
+          curl -s \
+            "https://api.getpostman.com/monitors/${{ matrix.suite.monitor_uid }}/results/latest" \
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -o "reports/${{ matrix.suite.name }}/monitor_latest.json"
+
+      - name: Upload per-suite artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: postman-monitor-results
-          path: monitor_results.json
+          name: reports-${{ matrix.suite.name }}
+          path: reports/${{ matrix.suite.name }}
+
+  aggregate:
+    needs: run-and-monitor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: reports-*
+          merge-multiple: true
+
+      - name: Build combined summary.csv + index.html
+        run: |
+          echo "suite,iterations,assertions,failed" > summary.csv
+          for n in current-weather daily-forecast historical-data; do
+            j="reports/$n/report.json"
+            it=$(jq '.run.stats.iterations.total' "$j")
+            as=$(jq '.run.stats.assertions.total' "$j")
+            fl=$(jq '.run.stats.assertions.failed' "$j")
+            echo "$n,$it,$as,$fl" >> summary.csv
+          done
+          cat > index.html <<'HTML'
+          <h1>Combined Results</h1>
+          <ul>
+            <li><a href="reports/current-weather/report.html">Current Weather (HTML)</a></li>
+            <li><a href="reports/daily-forecast/report.html">Daily Forecast (HTML)</a></li>
+            <li><a href="reports/historical-data/report.html">Historical Data (HTML)</a></li>
+          </ul>
+          HTML
+          mkdir -p combined && mv summary.csv index.html combined/
+
+      - name: Upload combined artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: combined
+          path: combined/
