@@ -1,9 +1,11 @@
-name: Automated API tests using Postman CLI
+name: Automated API tests + Monitor (multi-region)
 
-on: push
+on:
+  push:
+  workflow_dispatch:
 
 jobs:
-  automated-api-tests:
+  run-collection:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,19 +17,18 @@ jobs:
       - name: Login to Postman CLI
         run: postman login --with-api-key ${{ secrets.POSTMAN_API_KEY }}
 
-      # Run your collection with CSV data file
-      - name: Run Postman Collection
+      - name: Run Postman Collection (CSV)
         run: |
           postman collection run Weather_Monitoring_Demo.postman_collection.json \
             --iteration-data weather_all.csv \
-            --reporters cli,json --reporter-json-export run_results.json
+            --reporters cli,json \
+            --reporter-json-export run_results.json
 
       - name: Check Collection Run Results
         run: |
           TOTAL=$(jq '.run.stats.assertions.total' run_results.json)
           FAILED=$(jq '.run.stats.assertions.failed' run_results.json)
           PASSED=$((TOTAL - FAILED))
-
           echo "===================="
           echo "   Postman CLI Results  "
           echo "===================="
@@ -35,62 +36,109 @@ jobs:
           echo "Failed: $FAILED"
           echo "Total : $TOTAL"
           echo "===================="
-
           if [ "$FAILED" -gt 0 ]; then
             echo "Collection tests failed."
             exit 1
-          else
-            echo "All collection tests passed."
           fi
 
-      # Sync the updated collection into Postman workspace
-      - name: Sync Collection to Postman
+      - name: Sync Collection to Postman (optional)
+        if: always()
         run: |
-          curl -X PUT "https://api.getpostman.com/collections/${{ secrets.POSTMAN_COLLECTION_ID }}" \
+          curl -sS -X PUT "https://api.getpostman.com/collections/${{ secrets.POSTMAN_COLLECTION_ID }}" \
             -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d @Weather_Monitoring_Demo.postman_collection.json
+            --data-binary @Weather_Monitoring_Demo.postman_collection.json \
+            | jq .
 
-      # Trigger Postman Monitor Run
-      - name: Trigger Monitor Run
-        id: trigger_monitor
+      - name: Upload CLI run artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postman-cli-run
+          path: run_results.json
+
+  run-monitor-multiregion:
+    needs: run-collection
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        region: [ap-south, us-east, eu-west]  # Asia Pacific, US East, United Kingdom
+    env:
+      MONITOR_UID: ${{ secrets.POSTMAN_MONITOR_UID }}
+    steps:
+      - name: Trigger Monitor Run (region = ${{ matrix.region }})
+        id: trigger
+        env:
+          API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
-          RESPONSE=$(curl -s -X POST "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/run" \
-            -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
-            -H "Content-Type: application/json")
-          
-          MONITOR_RUN_ID=$(echo "$RESPONSE" | jq -r '.run.id')
-          echo "Monitor Run ID: $MONITOR_RUN_ID"
-          echo "monitor_run_id=$MONITOR_RUN_ID" >> $GITHUB_OUTPUT
+          # Request body lets you target a specific region for this ad-hoc run
+          BODY=$(jq -n --arg region "${{ matrix.region }}" '{ region: $region }')
 
-      # Wait and fetch Monitor Run Results
-      - name: Wait for Monitor Run and Fetch Results
+          RESPONSE=$(curl -sS -X POST "https://api.getpostman.com/monitors/${MONITOR_UID}/run" \
+            -H "X-Api-Key: $API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+
+          echo "$RESPONSE" | jq .
+          RUN_ID=$(echo "$RESPONSE" | jq -r '.run.id')
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "Failed to trigger monitor run."
+            exit 1
+          fi
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+
+      - name: Wait for Monitor Run to Finish
+        id: wait
+        env:
+          API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
-          RUN_ID=${{ steps.trigger_monitor.outputs.monitor_run_id }}
-          echo "Fetching results for Monitor Run ID: $RUN_ID"
+          RUN_ID="${{ steps.trigger.outputs.run_id }}"
+          echo "Polling run status for: $RUN_ID (region ${{ matrix.region }})"
 
-          # Wait until the monitor run is finished
-          STATUS=""
-          until [ "$STATUS" == "finished" ]; do
+          MAX_TRIES=60  # ~5 minutes @ 5s polling
+          TRY=0
+          STATUS="pending"
+
+          while [ $TRY -lt $MAX_TRIES ]; do
+            RESP=$(curl -sS -X GET "https://api.getpostman.com/monitors/${MONITOR_UID}/runs/${RUN_ID}" \
+              -H "X-Api-Key: $API_KEY")
+            STATUS=$(echo "$RESP" | jq -r '.run.status')
+            echo "Attempt $TRY → status: $STATUS"
+            if [ "$STATUS" = "finished" ] || [ "$STATUS" = "failed" ] || [ "$STATUS" = "error" ]; then
+              echo "$RESP" > monitor_run_${{ matrix.region }}.json
+              break
+            fi
             sleep 5
-            STATUS=$(curl -s -X GET "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/runs/$RUN_ID" \
-              -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" | jq -r '.run.status')
-            echo "Current status: $STATUS"
+            TRY=$((TRY+1))
           done
 
-          # Download final results
-          curl -s -X GET "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/runs/$RUN_ID" \
-            -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
-            -o monitor_results.json
+          if [ "$STATUS" != "finished" ] && [ "$STATUS" != "failed" ] && [ "$STATUS" != "error" ]; then
+            echo "Monitor did not finish in time."
+            exit 1
+          fi
 
-          echo "Monitor run results downloaded."
+      - name: Extract basic stats
+        run: |
+          FILE="monitor_run_${{ matrix.region }}.json"
+          jq -r '
+            {
+              runId: .run.id,
+              region: .run.region,
+              status: .run.status,
+              startedAt: .run.startedAt,
+              finishedAt: .run.finishedAt,
+              avgResponseMs: (.run.summary.responseTimeAvg // .run.responseTime // null),
+              failedAssertions: (.run.summary.assertions.failed // 0),
+              totalAssertions: (.run.summary.assertions.total // 0)
+            }
+          ' "$FILE" > monitor_summary_${{ matrix.region }}.json
+          cat monitor_summary_${{ matrix.region }}.json
 
-      # Upload Run Results
-      - name: Upload Run Results
-        uses: actions/upload-artifact@v4
+      - name: Upload Monitor Artifacts (region = ${{ matrix.region }})
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: postman-run-results
+          name: postman-monitor-${{ matrix.region }}
           path: |
-            run_results.json
-            monitor_results.json
+            monitor_run_${{ matrix.region }}.json
+            monitor_summary_${{ matrix.region }}.json
