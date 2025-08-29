@@ -1,0 +1,5 @@
+city,latitude,longitude,timezone,start_date,end_date
+London,51.5072,-0.1276,Europe/London,2025-08-01,2025-08-07
+Manchester,53.4808,-2.2426,Europe/London,2025-08-01,2025-08-07
+Birmingham,52.4862,-1.8904,Europe/London,2025-08-01,2025-08-07
+Edinburgh,55.9533,-3.1883,Europe/London,2025-08-01,2025-08-07

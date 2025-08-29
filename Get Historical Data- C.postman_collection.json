@@ -1,0 +1,91 @@
+{
+	"info": {
+		"_postman_id": "2ee059cb-e9e1-451b-9152-7a787a433cd9",
+		"name": "Get Historical Data- C",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "45974783",
+		"_collection_link": "https://postvehicle-enterprise-team-3244bd21-b4e1-4b1f-98bf-ef9e4de6.postman.co/workspace/2b1f8c87-7673-430b-93d9-4f732c44ce25/collection/45974783-2ee059cb-e9e1-451b-9152-7a787a433cd9?action=share&source=collection_link&creator=45974783"
+	},
+	"item": [
+		{
+			"name": "Get Historical Data",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Respnse-200 OK\", () => pm.response.to.have.status(200));\r",
+							"// Latency check\r",
+							"pm.test(\"Latency check- Response time is less than 1000ms\", function () {\r",
+							"    pm.expect(pm.response.responseTime).to.be.below(1000);\r",
+							"});\r",
+							"\r",
+							"const city = pm.iterationData.get(\"city\");\r",
+							"const json = pm.response.json();\r",
+							"const daily = json.daily || {};\r",
+							"const max = daily.temperature_2m_max || [];\r",
+							"const min = daily.temperature_2m_min || [];\r",
+							"\r",
+							"// Log first day and simple stats\r",
+							"if (max.length && min.length) {\r",
+							"  const first = `${daily.time?.[0]} → Max: ${max[0]}°C, Min: ${min[0]}°C`;\r",
+							"  const avgMax = (max.reduce((a,b)=>a+b,0) / max.length).toFixed(1);\r",
+							"  const avgMin = (min.reduce((a,b)=>a+b,0) / min.length).toFixed(1);\r",
+							"  console.log(`${city}: ${first} | Avg Max: ${avgMax}°C, Avg Min: ${avgMin}°C`);\r",
+							"} else {\r",
+							"  console.warn(`${city}: no daily data returned`);\r",
+							"}\r",
+							""
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "https://archive-api.open-meteo.com/v1/archive?latitude={{latitude}}&longitude={{longitude}}&start_date={{start_date}}&end_date={{end_date}}&daily=temperature_2m_max,temperature_2m_min&timezone={{timezone}}",
+					"protocol": "https",
+					"host": [
+						"archive-api",
+						"open-meteo",
+						"com"
+					],
+					"path": [
+						"v1",
+						"archive"
+					],
+					"query": [
+						{
+							"key": "latitude",
+							"value": "{{latitude}}"
+						},
+						{
+							"key": "longitude",
+							"value": "{{longitude}}"
+						},
+						{
+							"key": "start_date",
+							"value": "{{start_date}}"
+						},
+						{
+							"key": "end_date",
+							"value": "{{end_date}}"
+						},
+						{
+							"key": "daily",
+							"value": "temperature_2m_max,temperature_2m_min"
+						},
+						{
+							"key": "timezone",
+							"value": "{{timezone}}"
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}

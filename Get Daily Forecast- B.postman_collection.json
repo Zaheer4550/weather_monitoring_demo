@@ -1,0 +1,74 @@
+{
+	"info": {
+		"_postman_id": "a475a3e2-d29a-48f4-8845-84ca62085f0c",
+		"name": "Get Daily Forecast- B",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "45974783",
+		"_collection_link": "https://postvehicle-enterprise-team-3244bd21-b4e1-4b1f-98bf-ef9e4de6.postman.co/workspace/2b1f8c87-7673-430b-93d9-4f732c44ce25/collection/45974783-a475a3e2-d29a-48f4-8845-84ca62085f0c?action=share&source=collection_link&creator=45974783"
+	},
+	"item": [
+		{
+			"name": "Get Daily Forecast",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Response-200 OK\", () => pm.response.to.have.status(200));\r",
+							"\r",
+							"const city = pm.iterationData.get(\"city\");\r",
+							"const daily = pm.response.json().daily || {};\r",
+							"const maxTemps = daily.temperature_2m_max;\r",
+							"const minTemps = daily.temperature_2m_min;\r",
+							"\r",
+							"// Log today’s forecast\r",
+							"console.log(`${city} → Max: ${maxTemps[0]}°C, Min: ${minTemps[0]}°C`);\r",
+							"// Latency check\r",
+							"pm.test(\"Latency Check-Response time is less than 1000ms\", function () {\r",
+							"    pm.expect(pm.response.responseTime).to.be.below(1000);\r",
+							"});"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "https://api.open-meteo.com/v1/forecast?latitude={{latitude}}&longitude={{longitude}}&daily=temperature_2m_max,temperature_2m_min&timezone={{timezone}}",
+					"protocol": "https",
+					"host": [
+						"api",
+						"open-meteo",
+						"com"
+					],
+					"path": [
+						"v1",
+						"forecast"
+					],
+					"query": [
+						{
+							"key": "latitude",
+							"value": "{{latitude}}"
+						},
+						{
+							"key": "longitude",
+							"value": "{{longitude}}"
+						},
+						{
+							"key": "daily",
+							"value": "temperature_2m_max,temperature_2m_min"
+						},
+						{
+							"key": "timezone",
+							"value": "{{timezone}}"
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
