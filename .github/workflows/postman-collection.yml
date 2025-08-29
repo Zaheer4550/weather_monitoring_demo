@@ -8,62 +8,102 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Install Postman CLI
-      - name: Install Postman CLI
+      - name: Install dependencies (Postman CLI + jq)
         run: |
           curl -o- "https://dl-cli.pstmn.io/install/linux64.sh" | sh
+          sudo apt-get update && sudo apt-get install -y jq
 
-      # Login with API Key
       - name: Login to Postman CLI
         run: postman login --with-api-key ${{ secrets.POSTMAN_API_KEY }}
 
-        name: Extract COLLECTION_UID from collection file
-  run: |
-    export COLLECTION_UID=$(jq -r '.info._postman_id' Weather_Monitoring_Demo.postman_collection.json)
-    if [ -z "$COLLECTION_UID" ] || [ "$COLLECTION_UID" = "null" ]; then
-      echo "Could not read info._postman_id from collection file"; exit 1
-    fi
-    echo "COLLECTION_UID=$COLLECTION_UID" >> $GITHUB_ENV
+      # --- Update collection in Postman by UID (requires wrapper) ---
+      - name: Sync Collection to Postman (wrapped payload)
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+          POSTMAN_COLLECTION_UID: ${{ secrets.POSTMAN_COLLECTION_UID }}
+          POSTMAN_API_BASE: ${{ secrets.POSTMAN_API_BASE }}
+        run: |
+          API_BASE="${POSTMAN_API_BASE:-https://api.getpostman.com}"
 
-      # Sync the updated collection into Postman workspace
-      - name: Sync Collection to Postman
-        run: |
-          curl -X PUT "https://api.getpostman.com/collections/${{ secrets.POSTMAN_COLLECTION_ID }}" \
-            -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
+          FILE="Weather_Monitoring_Demo.postman_collection.json"
+          test -f "$FILE" || { echo "Collection file not found: $FILE"; exit 1; }
+
+          # Wrap as { "collection": <file JSON> }
+          jq -n --slurpfile c "$FILE" '{collection: $c[0]}' > wrapped_collection.json
+
+          echo "Updating collection ${POSTMAN_COLLECTION_UID}..."
+          curl -sS -X PUT "${API_BASE}/collections/${POSTMAN_COLLECTION_UID}" \
+            -H "X-Api-Key: ${POSTMAN_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d @Weather_Monitoring_Demo.postman_collection.json
-      # Trigger Postman Monitor Run (uses updated collection now)
+            --data-binary @wrapped_collection.json \
+            -o update_collection_response.json
+
+          echo "Update response:" && cat update_collection_response.json
+          jq -e 'if has("error") then halt_error(1) else . end' update_collection_response.json >/dev/null
+
+      # --- Trigger monitor run (now uses latest collection) ---
       - name: Trigger Monitor Run
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+          POSTMAN_MONITOR_UID: ${{ secrets.POSTMAN_MONITOR_UID }}
+          POSTMAN_API_BASE: ${{ secrets.POSTMAN_API_BASE }}
         run: |
-          curl -s -X POST "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/run" \
-            -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
+          API_BASE="${POSTMAN_API_BASE:-https://api.getpostman.com}"
+
+          curl -s -X POST "${API_BASE}/monitors/${POSTMAN_MONITOR_UID}/run" \
+            -H "X-Api-Key: ${POSTMAN_API_KEY}" \
             -H "Content-Type: application/json" \
             -o trigger_response.json
 
-          echo "Trigger response:"
-          cat trigger_response.json || true
+          echo "Trigger response:" && cat trigger_response.json || true
 
-      # Wait and fetch Monitor Run Results (poll results/latest; no run.id dependency)
+          # Capture trigger time if present (not always provided)
+          TRIGGER_STARTED_AT=$(jq -r '.run.info.startedAt // .run.info.startTime // empty' trigger_response.json)
+          echo "TRIGGER_STARTED_AT=${TRIGGER_STARTED_AT:-}" >> $GITHUB_ENV
+
+      # --- Poll results/latest until this run is done ---
       - name: Wait for Monitor Run and Fetch Results
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+          POSTMAN_MONITOR_UID: ${{ secrets.POSTMAN_MONITOR_UID }}
+          POSTMAN_API_BASE: ${{ secrets.POSTMAN_API_BASE }}
         run: |
+          API_BASE="${POSTMAN_API_BASE:-https://api.getpostman.com}"
+          TARGET_START="${TRIGGER_STARTED_AT:-}"
+
           echo "Waiting for monitor run to finish..."
-          STATUS=""
-          # poll every 10s until finished
-          until [ "$STATUS" = "finished" ]; do
+          ATTEMPTS=0
+          MAX_ATTEMPTS=60 # ~10 mins at 10s each
+          while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
             sleep 10
-            STATUS=$(curl -s -X GET "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/results/latest" \
-              -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" | jq -r '.run.status')
-            echo "Current status: ${STATUS:-null}"
+            RESP=$(curl -s -H "X-Api-Key: ${POSTMAN_API_KEY}" \
+              "${API_BASE}/monitors/${POSTMAN_MONITOR_UID}/results/latest")
+
+            STATUS=$(echo "$RESP" | jq -r '.run.status // empty')
+            RUN_START=$(echo "$RESP" | jq -r '.run.info.startTime // empty')
+
+            if [ -z "$STATUS" ] || [ -z "$RUN_START" ]; then
+              echo "No run yet; body:" && echo "$RESP"
+              ATTEMPTS=$((ATTEMPTS+1)); continue
+            fi
+
+            if [ -n "$TARGET_START" ] && [ "$RUN_START" \< "$TARGET_START" ]; then
+              echo "Seen older run ($RUN_START); waiting for the triggered one ($TARGET_START)..."
+              ATTEMPTS=$((ATTEMPTS+1)); continue
+            fi
+
+            echo "Current status: $STATUS (started: $RUN_START)"
+            if [ "$STATUS" = "finished" ] || [ "$STATUS" = "error" ]; then
+              echo "$RESP" > monitor_results.json
+              break
+            fi
+
+            ATTEMPTS=$((ATTEMPTS+1))
           done
 
-          # Save the finished run
-          curl -s -X GET "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/results/latest" \
-            -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
-            -o monitor_results.json
+          test -f monitor_results.json || { echo "Timed out waiting for run results."; echo "$RESP" > monitor_results.json; }
 
-          echo "Monitor run results downloaded."
-
-      # Convert JSON results into CSV (includes region + startedAt)
+      # --- Convert to CSV (includes region + start time) ---
       - name: Convert Monitor Results to CSV (with region)
         run: |
           jq -r '
@@ -79,12 +119,13 @@ jobs:
               ] | @csv
           ' monitor_results.json > monitor_results.csv
 
-      # Upload Run Results
       - name: Upload Run Results
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: postman-run-results
           path: |
+            trigger_response.json
+            update_collection_response.json
             monitor_results.json
             monitor_results.csv
