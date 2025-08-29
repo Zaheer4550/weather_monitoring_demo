@@ -17,6 +17,14 @@ jobs:
       - name: Login to Postman CLI
         run: postman login --with-api-key ${{ secrets.POSTMAN_API_KEY }}
 
+        name: Extract COLLECTION_UID from collection file
+  run: |
+    export COLLECTION_UID=$(jq -r '.info._postman_id' Weather_Monitoring_Demo.postman_collection.json)
+    if [ -z "$COLLECTION_UID" ] || [ "$COLLECTION_UID" = "null" ]; then
+      echo "Could not read info._postman_id from collection file"; exit 1
+    fi
+    echo "COLLECTION_UID=$COLLECTION_UID" >> $GITHUB_ENV
+
       # Sync the updated collection into Postman workspace
       - name: Sync Collection to Postman
         run: |
