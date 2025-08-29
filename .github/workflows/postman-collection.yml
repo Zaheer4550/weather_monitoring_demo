@@ -1,15 +1,31 @@
-env:
-  POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
-
-# Example: list monitors to get UIDs
-- name: List monitors
-  run: |
-    curl -s https://api.getpostman.com/monitors \
-      -H "X-Api-Key: $POSTMAN_API_KEY" | jq
-
-# Example: trigger a monitor by UID
-- name: Trigger monitor
-  run: |
-    curl -s -X POST \
-      "https://api.getpostman.com/monitors/<MONITOR_UID>/run" \
-      -H "X-Api-Key: $POSTMAN_API_KEY"
+name: Automated API tests using Postman CLI
+ 
+on: push
+ 
+jobs:
+  automated-api-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+ 
+      - name: Install Postman CLI
+        run: |
+          curl -o- "https://dl-cli.pstmn.io/install/linux64.sh" | sh
+ 
+      - name: Login to Postman CLI
+        run: postman login --with-api-key ${{ secrets.POSTMAN_API_KEY }}
+ 
+      - name: Debug – list repo files
+        run: ls -R
+ 
+      - name: Get list of Postman Monitors
+        run: |
+          curl -s -X GET https://api.getpostman.com/monitors \
+            -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
+            -o monitor_results.json
+ 
+      - name: Upload Monitor Run Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: postman-monitor-results
+          path: monitor_results.json
