@@ -24,46 +24,51 @@ jobs:
             -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d @Weather_Monitoring_Demo.postman_collection.json
-
       # Trigger Postman Monitor Run (uses updated collection now)
       - name: Trigger Monitor Run
-        id: trigger_monitor
         run: |
-          RESPONSE=$(curl -s -X POST "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/run" \
+          curl -s -X POST "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/run" \
             -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
-            -H "Content-Type: application/json")
-          MONITOR_RUN_ID=$(echo "$RESPONSE" | jq -r '.run.id')
-          echo "Monitor Run ID: $MONITOR_RUN_ID"
-          echo "monitor_run_id=$MONITOR_RUN_ID" >> $GITHUB_OUTPUT
+            -H "Content-Type: application/json" \
+            -o trigger_response.json
 
-      # Wait and fetch Monitor Run Results
+          echo "Trigger response:"
+          cat trigger_response.json || true
+
+      # Wait and fetch Monitor Run Results (poll results/latest; no run.id dependency)
       - name: Wait for Monitor Run and Fetch Results
         run: |
-          RUN_ID=${{ steps.trigger_monitor.outputs.monitor_run_id }}
-          echo "Fetching results for Monitor Run ID: $RUN_ID"
-
+          echo "Waiting for monitor run to finish..."
           STATUS=""
-          until [ "$STATUS" == "finished" ]; do
-            sleep 5
-            STATUS=$(curl -s -X GET "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/runs/$RUN_ID" \
+          # poll every 10s until finished
+          until [ "$STATUS" = "finished" ]; do
+            sleep 10
+            STATUS=$(curl -s -X GET "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/results/latest" \
               -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" | jq -r '.run.status')
-            echo "Current status: $STATUS"
+            echo "Current status: ${STATUS:-null}"
           done
 
-          # Download final results
-          curl -s -X GET "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/runs/$RUN_ID" \
+          # Save the finished run
+          curl -s -X GET "https://api.getpostman.com/monitors/${{ secrets.POSTMAN_MONITOR_ID }}/results/latest" \
             -H "X-Api-Key: ${{ secrets.POSTMAN_API_KEY }}" \
             -o monitor_results.json
 
           echo "Monitor run results downloaded."
 
-      # Convert JSON results into CSV (latency, status, etc.)
-      - name: Convert Monitor Results to CSV
+      # Convert JSON results into CSV (includes region + startedAt)
+      - name: Convert Monitor Results to CSV (with region)
         run: |
           jq -r '
-            .run.executions[] 
-            | [.item.name, .response.code, .response.status, .response.responseTime] 
-            | @csv
+            . as $root
+            | ($root.run.executions // [])[]
+            | [
+                .item.name,
+                (.response.code // "NA"),
+                (.response.status // "NA"),
+                (.response.responseTime // "NA"),
+                ($root.run.info.region // "unknown"),
+                ($root.run.info.startTime // "unknown")
+              ] | @csv
           ' monitor_results.json > monitor_results.csv
 
       # Upload Run Results
