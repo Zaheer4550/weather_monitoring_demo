@@ -1,4 +1,4 @@
-name: Run 3 Postman collections + trigger monitors
+name: Run 3 Postman collections + trigger monitors + latency summary
 
 on:
   push:
@@ -112,3 +112,49 @@ jobs:
         with:
           name: combined
           path: combined/
+
+  latency-summary:
+    needs: aggregate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch 24h latency results for all monitors
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          mkdir -p latency
+          START=$(date -d "yesterday 00:00:00" +%s)
+          END=$(date -d "today 00:00:00" +%s)
+
+          echo "monitor,region,timestamp,avg_latency_ms" > latency/latency.csv
+
+          for uid in \
+            45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f \
+            45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6 \
+            45974783-1f084d7b-f131-47e0-b084-7926fd355a25
+          do
+            NAME=$(curl -s -H "X-Api-Key: $POSTMAN_API_KEY" \
+              "https://api.getpostman.com/monitors/$uid" | jq -r '.monitor.name')
+
+            curl -s -H "X-Api-Key: $POSTMAN_API_KEY" \
+              "https://api.getpostman.com/monitors/$uid/results?since=$START&until=$END" \
+              -o latency/${uid}.json
+
+            jq -r --arg NAME "$NAME" '.results[] | [$NAME, .region, .timestamp, .run.info.responseTime] | @csv' latency/${uid}.json \
+              >> latency/latency.csv
+          done
+
+          # Build HTML table
+          {
+            echo "<h1>Latency Summary (24h)</h1><table border=1>"
+            echo "<tr><th>Monitor</th><th>Region</th><th>Timestamp</th><th>Avg Latency (ms)</th></tr>"
+            tail -n +2 latency/latency.csv | while IFS=, read monitor region ts latency; do
+              echo "<tr><td>$monitor</td><td>$region</td><td>$ts</td><td>$latency</td></tr>"
+            done
+            echo "</table>"
+          } > latency/latency.html
+
+      - name: Upload latency summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: latency-summary
+          path: latency/
