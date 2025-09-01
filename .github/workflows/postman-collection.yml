@@ -52,13 +52,14 @@ jobs:
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -o "reports/${{ matrix.suite.name }}/monitor_kick.json"
 
-          sleep 20
+          # Wait for Postman monitor to finish
+          sleep 40
           curl -s \
             "https://api.getpostman.com/monitors/${{ matrix.suite.monitor_uid }}/results/latest" \
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -o "reports/${{ matrix.suite.name }}/monitor_latest.json"
 
-           - name: Extract latency for current run (multi-region)
+      - name: Extract latency for current run (multi-region + chart + average)
         run: |
           json="reports/${{ matrix.suite.name }}/monitor_latest.json"
 
@@ -66,16 +67,57 @@ jobs:
             jq -r '.results[] | [.monitor.name, .region, .timestamp, .run.info.responseTime] | @csv' \
               "$json" > "reports/${{ matrix.suite.name }}/latency.csv"
 
+            # Calculate average latency
+            avg=$(awk -F, '{sum+=$4; count++} END {if (count>0) print int(sum/count); else print 0}' "reports/${{ matrix.suite.name }}/latency.csv")
+            generated_at=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
             {
               echo "<h1>Latency Report – ${{ matrix.suite.name }}</h1>"
+              echo "<p><i>Generated at: ${generated_at}</i></p>"
               echo "<p><a href=\"report.html\">View Full Run Report</a></p>"
+
+              # Table
               echo "<table border=1>"
               echo "<tr><th>Monitor</th><th>Region</th><th>Timestamp</th><th>Latency (ms)</th></tr>"
               tail -n +1 "reports/${{ matrix.suite.name }}/latency.csv" | while IFS=, read monitor region ts latency; do
                 echo "<tr><td>$monitor</td><td>$region</td><td>$ts</td><td>$latency</td></tr>"
               done
+              echo "<tr><td colspan=3><b>Overall Average</b></td><td><b>${avg}</b></td></tr>"
               echo "</table>"
+
+              # Chart.js bar graph
+              echo "<h2>Latency by Region</h2>"
+              echo "<canvas id='latencyChart' width='400' height='200'></canvas>"
+              echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
+              echo "<script>"
+              echo "const ctx = document.getElementById('latencyChart').getContext('2d');"
+
+              regions=$(cut -d, -f2 "reports/${{ matrix.suite.name }}/latency.csv" | paste -sd, -)
+              latencies=$(cut -d, -f4 "reports/${{ matrix.suite.name }}/latency.csv" | paste -sd, -)
+
+              echo "const data = {"
+              echo "  labels: [$(echo $regions | sed 's/,/\",\"/g; s/^/\"/; s/$/\"/')],"
+              echo "  datasets: [{"
+              echo "    label: 'Latency (ms)',"
+              echo "    data: [${latencies}],"
+              echo "    backgroundColor: ["
+              echo "      'rgba(255, 99, 132, 0.6)',"   # Asia Pacific → Red
+              echo "      'rgba(54, 162, 235, 0.6)',"  # US → Blue
+              echo "      'rgba(255, 206, 86, 0.6)'"   # UK → Yellow
+              echo "    ]"
+              echo "  }]"
+              echo "};"
+
+              echo "new Chart(ctx, {type: 'bar', data: data});"
+              echo "document.write('<p><b>Overall Avg Latency:</b> ${avg} ms</p>');"
+              echo "</script>"
             } > "reports/${{ matrix.suite.name }}/latency.html"
           else
             echo "⚠️ No latency data found for ${{ matrix.suite.name }}" > "reports/${{ matrix.suite.name }}/latency.html"
           fi
+
+      - name: Upload per-suite artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ matrix.suite.name }}
+          path: reports/${{ matrix.suite.name }}
