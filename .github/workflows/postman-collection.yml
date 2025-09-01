@@ -1,11 +1,11 @@
-name: Run 3 Postman collections + trigger monitors + latency summary (per monitor only)
+name: Run 3 Postman collections + latency report from Newman
 
 on:
   push:
   workflow_dispatch:
 
 jobs:
-  run-and-monitor:
+  run-collections:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -13,15 +13,12 @@ jobs:
           - name: current-weather
             collection: "Get Current Weather_A.postman_collection.json"
             data:       "current_weather_cities.csv"
-            monitor_uid: "45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f"
           - name: daily-forecast
             collection: "Get Daily Forecast- B.postman_collection.json"
             data:       "Forecast_cities.csv"
-            monitor_uid: "45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6"
           - name: historical-data
             collection: "Get Historical Data- C.postman_collection.json"
             data:       "Historical_cities.csv"
-            monitor_uid: "45974783-1f084d7b-f131-47e0-b084-7926fd355a25"
 
     steps:
       - uses: actions/checkout@v4
@@ -43,47 +40,17 @@ jobs:
             --reporter-junit-export      "reports/${{ matrix.suite.name }}/report.junit.xml" \
             --delay-request 250
 
-      - name: Trigger cloud monitor and fetch results (with run.id)
-        env:
-          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+      - name: Extract latency from Newman report.json
         run: |
-          # Trigger monitor run
-          curl -s -X POST \
-            "https://api.getpostman.com/monitors/${{ matrix.suite.monitor_uid }}/run" \
-            -H "X-Api-Key: $POSTMAN_API_KEY" \
-            -o "reports/${{ matrix.suite.name }}/monitor_kick.json"
+          json="reports/${{ matrix.suite.name }}/report.json"
 
-          # Extract run.id
-          run_id=$(jq -r '.run.id' "reports/${{ matrix.suite.name }}/monitor_kick.json")
-          echo "Run ID: $run_id"
+          if [ -f "$json" ]; then
+            # Extract request names and response times
+            jq -r '.run.executions[] | [.item.name, .response.responseTime] | @csv' "$json" \
+              > "reports/${{ matrix.suite.name }}/latency.csv"
 
-          # Retry loop (max 6 tries = 60s)
-          for i in {1..6}; do
-            echo "⏳ Checking for monitor results... attempt $i"
-            curl -s \
-              "https://api.getpostman.com/monitors/${{ matrix.suite.monitor_uid }}/results/$run_id" \
-              -H "X-Api-Key: $POSTMAN_API_KEY" \
-              -o "reports/${{ matrix.suite.name }}/monitor_latest.json"
-
-            if jq -e '.results | length > 0' "reports/${{ matrix.suite.name }}/monitor_latest.json" > /dev/null; then
-              echo "✅ Monitor results ready!"
-              break
-            fi
-
-            echo "⚠️ No results yet. Waiting 10s..."
-            sleep 10
-          done
-
-      - name: Extract latency for current run (multi-region + chart + average)
-        run: |
-          json="reports/${{ matrix.suite.name }}/monitor_latest.json"
-
-          if jq -e '.results | length > 0' "$json" > /dev/null; then
-            jq -r '.results[] | [.monitor.name, .region, .timestamp, .run.info.responseTime] | @csv' \
-              "$json" > "reports/${{ matrix.suite.name }}/latency.csv"
-
-            # Calculate average latency
-            avg=$(awk -F, '{sum+=$4; count++} END {if (count>0) print int(sum/count); else print 0}' "reports/${{ matrix.suite.name }}/latency.csv")
+            # Calculate overall average
+            avg=$(awk -F, '{sum+=$2; count++} END {if (count>0) print int(sum/count); else print 0}' "reports/${{ matrix.suite.name }}/latency.csv")
             generated_at=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
             {
@@ -93,33 +60,29 @@ jobs:
 
               # Table
               echo "<table border=1>"
-              echo "<tr><th>Monitor</th><th>Region</th><th>Timestamp</th><th>Latency (ms)</th></tr>"
-              tail -n +1 "reports/${{ matrix.suite.name }}/latency.csv" | while IFS=, read monitor region ts latency; do
-                echo "<tr><td>$monitor</td><td>$region</td><td>$ts</td><td>$latency</td></tr>"
+              echo "<tr><th>Request</th><th>Latency (ms)</th></tr>"
+              tail -n +1 "reports/${{ matrix.suite.name }}/latency.csv" | while IFS=, read name latency; do
+                echo "<tr><td>$name</td><td>$latency</td></tr>"
               done
-              echo "<tr><td colspan=3><b>Overall Average</b></td><td><b>${avg}</b></td></tr>"
+              echo "<tr><td><b>Overall Average</b></td><td><b>${avg}</b></td></tr>"
               echo "</table>"
 
               # Chart.js bar graph
-              echo "<h2>Latency by Region</h2>"
-              echo "<canvas id='latencyChart' width='400' height='200'></canvas>"
+              echo "<h2>Latency per Request</h2>"
+              echo "<canvas id='latencyChart' width='600' height='300'></canvas>"
               echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
               echo "<script>"
               echo "const ctx = document.getElementById('latencyChart').getContext('2d');"
 
-              regions=$(cut -d, -f2 "reports/${{ matrix.suite.name }}/latency.csv" | paste -sd, -)
-              latencies=$(cut -d, -f4 "reports/${{ matrix.suite.name }}/latency.csv" | paste -sd, -)
+              requests=$(cut -d, -f1 "reports/${{ matrix.suite.name }}/latency.csv" | sed 's/^/\"/;s/$/\"/' | paste -sd, -)
+              latencies=$(cut -d, -f2 "reports/${{ matrix.suite.name }}/latency.csv" | paste -sd, -)
 
               echo "const data = {"
-              echo "  labels: [$(echo $regions | sed 's/,/\",\"/g; s/^/\"/; s/$/\"/')],"
+              echo "  labels: [$requests],"
               echo "  datasets: [{"
               echo "    label: 'Latency (ms)',"
               echo "    data: [${latencies}],"
-              echo "    backgroundColor: ["
-              echo "      'rgba(255, 99, 132, 0.6)',"   # Asia Pacific → Red
-              echo "      'rgba(54, 162, 235, 0.6)',"  # US → Blue
-              echo "      'rgba(255, 206, 86, 0.6)'"   # UK → Yellow
-              echo "    ]"
+              echo "    backgroundColor: 'rgba(54, 162, 235, 0.6)'"
               echo "  }]"
               echo "};"
 
@@ -128,7 +91,7 @@ jobs:
               echo "</script>"
             } > "reports/${{ matrix.suite.name }}/latency.html"
           else
-            echo "⚠️ No latency data found for ${{ matrix.suite.name }}" > "reports/${{ matrix.suite.name }}/latency.html"
+            echo "⚠️ No report.json found for ${{ matrix.suite.name }}" > "reports/${{ matrix.suite.name }}/latency.html"
           fi
 
       - name: Upload per-suite artifacts
