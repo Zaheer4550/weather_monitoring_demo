@@ -6,7 +6,7 @@ on:
       - main
   schedule:
     - cron: "0 0 * * *"   # daily summary
-  workflow_dispatch:       # allows manual trigger
+  workflow_dispatch:       # manual trigger
 
 jobs:
   # -----------------------------------
@@ -81,7 +81,7 @@ jobs:
   # 3. Daily summary
   # -----------------------------------
   daily-summary:
-    if: github.event.schedule == '0 0 * * *'
+    if: github.event.schedule == '0 0 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Install jq
