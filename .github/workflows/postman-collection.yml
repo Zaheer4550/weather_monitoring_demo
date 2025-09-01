@@ -43,20 +43,25 @@ jobs:
             --reporter-junit-export      "reports/${{ matrix.suite.name }}/report.junit.xml" \
             --delay-request 250
 
-      - name: Trigger cloud monitor and fetch latest result (with retry)
+      - name: Trigger cloud monitor and fetch results (with run.id)
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
+          # Trigger monitor run
           curl -s -X POST \
             "https://api.getpostman.com/monitors/${{ matrix.suite.monitor_uid }}/run" \
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -o "reports/${{ matrix.suite.name }}/monitor_kick.json"
 
+          # Extract run.id
+          run_id=$(jq -r '.run.id' "reports/${{ matrix.suite.name }}/monitor_kick.json")
+          echo "Run ID: $run_id"
+
           # Retry loop (max 6 tries = 60s)
           for i in {1..6}; do
             echo "⏳ Checking for monitor results... attempt $i"
             curl -s \
-              "https://api.getpostman.com/monitors/${{ matrix.suite.monitor_uid }}/results/latest" \
+              "https://api.getpostman.com/monitors/${{ matrix.suite.monitor_uid }}/results/$run_id" \
               -H "X-Api-Key: $POSTMAN_API_KEY" \
               -o "reports/${{ matrix.suite.name }}/monitor_latest.json"
 
