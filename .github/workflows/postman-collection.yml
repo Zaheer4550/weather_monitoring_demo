@@ -47,13 +47,11 @@ jobs:
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
-          # Kick the monitor
           curl -s -X POST \
             "https://api.getpostman.com/monitors/${{ matrix.suite.monitor_uid }}/run" \
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -o "reports/${{ matrix.suite.name }}/monitor_kick.json"
 
-          # Wait briefly, then capture latest result JSON
           sleep 20
           curl -s \
             "https://api.getpostman.com/monitors/${{ matrix.suite.monitor_uid }}/results/latest" \
@@ -77,26 +75,33 @@ jobs:
 
       - name: Debug downloaded files
         run: |
-          echo "Listing all files after artifact download:"
-          ls -R
+          echo "Files after artifact download:"
+          find reports -type f || echo "No files found"
 
       - name: Build combined summary.csv + index.html
         run: |
           echo "suite,iterations,assertions,failed" > summary.csv
-          find reports -type f -name "report.json" | while read json; do
-            folder=$(dirname "$json")
-            name=$(basename "$folder")
-            it=$(jq '.run.stats.iterations.total' "$json")
-            as=$(jq '.run.stats.assertions.total' "$json")
-            fl=$(jq '.run.stats.assertions.failed' "$json")
-            echo "$name,$it,$as,$fl" >> summary.csv
+
+          for n in current-weather daily-forecast historical-data; do
+            json="reports/$n/report.json"
+            if [ -f "$json" ]; then
+              it=$(jq '.run.stats.iterations.total' "$json")
+              as=$(jq '.run.stats.assertions.total' "$json")
+              fl=$(jq '.run.stats.assertions.failed' "$json")
+              echo "$n,$it,$as,$fl" >> summary.csv
+            else
+              echo "⚠️ $n has no report.json"
+            fi
           done
 
           echo "<h1>Combined Results</h1><ul>" > index.html
-          find reports -type f -name "report.html" | while read html; do
-            folder=$(dirname "$html")
-            name=$(basename "$folder")
-            echo "<li><a href=\"$html\">$name (HTML Report)</a></li>" >> index.html
+          for n in current-weather daily-forecast historical-data; do
+            html="reports/$n/report.html"
+            if [ -f "$html" ]; then
+              echo "<li><a href=\"$html\">$n (HTML Report)</a></li>" >> index.html
+            else
+              echo "<li>$n — ⚠️ no HTML report found</li>" >> index.html
+            fi
           done
           echo "</ul>" >> index.html
 
