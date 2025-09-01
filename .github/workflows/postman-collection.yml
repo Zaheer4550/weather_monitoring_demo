@@ -47,13 +47,13 @@ jobs:
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
-          # kick the monitor
+          # Kick the monitor
           curl -s -X POST \
             "https://api.getpostman.com/monitors/${{ matrix.suite.monitor_uid }}/run" \
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -o "reports/${{ matrix.suite.name }}/monitor_kick.json"
 
-          # brief wait, then capture latest result JSON
+          # Wait briefly, then capture latest result JSON
           sleep 20
           curl -s \
             "https://api.getpostman.com/monitors/${{ matrix.suite.monitor_uid }}/results/latest" \
@@ -75,41 +75,29 @@ jobs:
           pattern: reports-*
           merge-multiple: true
 
-      - name: Debug list reports
+      - name: Debug downloaded files
         run: |
-          echo "Reports directory structure:"
-          ls -R reports || echo "No reports found"
+          echo "Listing all files after artifact download:"
+          ls -R
 
       - name: Build combined summary.csv + index.html
         run: |
           echo "suite,iterations,assertions,failed" > summary.csv
-          for folder in reports/*; do
-            if [ -d "$folder" ]; then
-              name=$(basename "$folder")
-              json="$folder/report.json"
-              if [ -f "$json" ]; then
-                it=$(jq '.run.stats.iterations.total' "$json")
-                as=$(jq '.run.stats.assertions.total' "$json")
-                fl=$(jq '.run.stats.assertions.failed' "$json")
-                echo "$name,$it,$as,$fl" >> summary.csv
-              else
-                echo "⚠️ Skipping $name (no report.json found)"
-              fi
-            fi
+          find reports -type f -name "report.json" | while read json; do
+            folder=$(dirname "$json")
+            name=$(basename "$folder")
+            it=$(jq '.run.stats.iterations.total' "$json")
+            as=$(jq '.run.stats.assertions.total' "$json")
+            fl=$(jq '.run.stats.assertions.failed' "$json")
+            echo "$name,$it,$as,$fl" >> summary.csv
           done
 
-          cat > index.html <<'HTML'
-          <h1>Combined Results</h1>
-          <ul>
-          HTML
-
-          for folder in reports/*; do
-            if [ -d "$folder" ]; then
-              name=$(basename "$folder")
-              echo "<li><a href=\"$folder/report.html\">$name (HTML Report)</a></li>" >> index.html
-            fi
+          echo "<h1>Combined Results</h1><ul>" > index.html
+          find reports -type f -name "report.html" | while read html; do
+            folder=$(dirname "$html")
+            name=$(basename "$folder")
+            echo "<li><a href=\"$html\">$name (HTML Report)</a></li>" >> index.html
           done
-
           echo "</ul>" >> index.html
 
           mkdir -p combined && mv summary.csv index.html combined/
