@@ -58,25 +58,24 @@ jobs:
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -o "reports/${{ matrix.suite.name }}/monitor_latest.json"
 
-      - name: Extract latency for current run
+           - name: Extract latency for current run (multi-region)
         run: |
           json="reports/${{ matrix.suite.name }}/monitor_latest.json"
-          jq -r '[.monitor.name, .results[0].region, .results[0].timestamp, .results[0].run.info.responseTime] | @csv' \
-            "$json" > "reports/${{ matrix.suite.name }}/latency.csv"
 
-          {
-            echo "<h1>Latency Report – ${{ matrix.suite.name }}</h1>"
-            echo "<p><a href=\"report.html\">View Full Run Report</a></p>"
-            echo "<table border=1>"
-            echo "<tr><th>Monitor</th><th>Region</th><th>Timestamp</th><th>Latency (ms)</th></tr>"
-            tail -n +1 "reports/${{ matrix.suite.name }}/latency.csv" | while IFS=, read monitor region ts latency; do
-              echo "<tr><td>$monitor</td><td>$region</td><td>$ts</td><td>$latency</td></tr>"
-            done
-            echo "</table>"
-          } > "reports/${{ matrix.suite.name }}/latency.html"
+          if jq -e '.results | length > 0' "$json" > /dev/null; then
+            jq -r '.results[] | [.monitor.name, .region, .timestamp, .run.info.responseTime] | @csv' \
+              "$json" > "reports/${{ matrix.suite.name }}/latency.csv"
 
-      - name: Upload per-suite artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: reports-${{ matrix.suite.name }}
-          path: reports/${{ matrix.suite.name }}
+            {
+              echo "<h1>Latency Report – ${{ matrix.suite.name }}</h1>"
+              echo "<p><a href=\"report.html\">View Full Run Report</a></p>"
+              echo "<table border=1>"
+              echo "<tr><th>Monitor</th><th>Region</th><th>Timestamp</th><th>Latency (ms)</th></tr>"
+              tail -n +1 "reports/${{ matrix.suite.name }}/latency.csv" | while IFS=, read monitor region ts latency; do
+                echo "<tr><td>$monitor</td><td>$region</td><td>$ts</td><td>$latency</td></tr>"
+              done
+              echo "</table>"
+            } > "reports/${{ matrix.suite.name }}/latency.html"
+          else
+            echo "⚠️ No latency data found for ${{ matrix.suite.name }}" > "reports/${{ matrix.suite.name }}/latency.html"
+          fi
