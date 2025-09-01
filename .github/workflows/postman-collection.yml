@@ -1,140 +1,189 @@
-name: Postman Collection Sync + Daily Monitor Summary
+name: Postman Collection Sync + Hourly Monitor Summary
 
 on:
   push:
     branches:
       - main
   schedule:
-    - cron: "0 0 * * *"   # daily summary
-  workflow_dispatch:       # manual trigger
+    # Run summary every hour
+    - cron: "0 * * * *"
+  workflow_dispatch:
 
 jobs:
-  # -----------------------------------
-  # 1. Test SMTP (manual trigger only)
-  # -----------------------------------
-  smtp-test:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Send Test Email
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          username: ${{ secrets.SMTP_USER }}
-          password: ${{ secrets.SMTP_PASS }}
-          subject: "SMTP Test Email from GitHub Actions"
-          to: "team@example.com"
-          from: "ci-bot@example.com"
-          body: |
-            Hello 👋
-
-            This is a test email from GitHub Actions.
-            If you are reading this, SMTP settings are working fine!
-
-  # -----------------------------------
-  # 2. Sync collections on push
-  # -----------------------------------
+  # ---------------------------
+  # 1. Sync collections on push
+  # ---------------------------
   update-collections:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Update Current Weather Collection
+      - name: Update Current Weather Collection & Trigger Monitor
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
+          mkdir -p artifacts/current-weather
           curl -s -X PUT "https://api.getpostman.com/collections/12345-current-weather-uid" \
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -H "Content-Type: application/json" \
-            -d @Get\ Current\ Weather_A.postman_collection.json
+            -d @Get\ Current\ Weather_A.postman_collection.json \
+            -o artifacts/current-weather/collection_update.json
 
           curl -s -X POST "https://api.getpostman.com/monitors/45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f/run" \
-            -H "X-Api-Key: $POSTMAN_API_KEY"
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -o artifacts/current-weather/monitor_trigger.json
 
-      - name: Update Daily Forecast Collection
+      - name: Update Daily Forecast Collection & Trigger Monitor
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
+          mkdir -p artifacts/daily-forecast
           curl -s -X PUT "https://api.getpostman.com/collections/12345-daily-forecast-uid" \
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -H "Content-Type: application/json" \
-            -d @Get\ Daily\ Forecast-\ B.postman_collection.json
+            -d @Get\ Daily\ Forecast-\ B.postman_collection.json \
+            -o artifacts/daily-forecast/collection_update.json
 
           curl -s -X POST "https://api.getpostman.com/monitors/45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6/run" \
-            -H "X-Api-Key: $POSTMAN_API_KEY"
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -o artifacts/daily-forecast/monitor_trigger.json
 
-      - name: Update Historical Data Collection
+      - name: Update Historical Data Collection & Trigger Monitor
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
+          mkdir -p artifacts/historical-data
           curl -s -X PUT "https://api.getpostman.com/collections/12345-historical-data-uid" \
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -H "Content-Type: application/json" \
-            -d @Get\ Historical\ Data-\ C.postman_collection.json
+            -d @Get\ Historical\ Data-\ C.postman_collection.json \
+            -o artifacts/historical-data/collection_update.json
 
           curl -s -X POST "https://api.getpostman.com/monitors/45974783-1f084d7b-f131-47e0-b084-7926fd355a25/run" \
-            -H "X-Api-Key: $POSTMAN_API_KEY"
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -o artifacts/historical-data/monitor_trigger.json
 
-  # -----------------------------------
-  # 3. Daily summary
-  # -----------------------------------
-  daily-summary:
-    if: github.event.schedule == '0 0 * * *' || github.event_name == 'workflow_dispatch'
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-updates
+          path: artifacts/
+
+  # ---------------------------
+  # 2. Hourly summary job
+  # ---------------------------
+  hourly-summary:
+    if: github.event.schedule == '0 * * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Install jq
         run: sudo apt-get update -y && sudo apt-get install -y jq
 
-      - name: Build 24h Monitor Summary with Charts
+      - name: Build 1h Monitor Summary (per monitor + combined)
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
-          mkdir -p summary
+          mkdir -p summary/combined
 
-          START=$(date -d "yesterday 00:00:00" +%s)
-          END=$(date -d "today 00:00:00" +%s)
+          START=$(date -d "1 hour ago" +%s)
+          END=$(date +%s)
 
-          echo "monitor,timestamp,region,status,responseTime" > summary/monitor.csv
+          echo "monitor,timestamp,region,status,responseTime" > summary/combined/monitor.csv
 
-          for uid in \
-            45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f \
-            45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6 \
-            45974783-1f084d7b-f131-47e0-b084-7926fd355a25
-          do
-            NAME=$(curl -s -H "X-Api-Key: $POSTMAN_API_KEY" \
-              "https://api.getpostman.com/monitors/$uid" | jq -r '.monitor.name')
+          declare -A monitors=(
+            ["current-weather"]="45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f"
+            ["daily-forecast"]="45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6"
+            ["historical-data"]="45974783-1f084d7b-f131-47e0-b084-7926fd355a25"
+          )
 
+          for name in "${!monitors[@]}"; do
+            uid=${monitors[$name]}
+            mkdir -p summary/$name
+
+            # Fetch monitor results
             curl -s -H "X-Api-Key: $POSTMAN_API_KEY" \
               "https://api.getpostman.com/monitors/$uid/results?since=$START&until=$END" \
-              -o summary/${uid}.json
+              -o summary/$name/results.json
 
-            jq -r --arg NAME "$NAME" '.results[] | [$NAME, .timestamp, .region, .status, .run.info.responseTime] | @csv' summary/${uid}.json \
-              >> summary/monitor.csv
+            jq -r --arg NAME "$name" '.results[] | [$NAME, .timestamp, .region, .status, .run.info.responseTime] | @csv' summary/$name/results.json \
+              > summary/$name/monitor.csv
+
+            cat summary/$name/monitor.csv >> summary/combined/monitor.csv
+
+            # Build per-monitor HTML
+            {
+              echo "<h1>1h Report – $name</h1>"
+              echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
+
+              echo "<h2>Monitor Results</h2>"
+              echo "<table border=1><tr><th>Monitor</th><th>Timestamp</th><th>Region</th><th>Status</th><th>Response Time (ms)</th></tr>"
+              tail -n +1 summary/$name/monitor.csv | while IFS=, read monitor ts region status rt; do
+                echo "<tr><td>$monitor</td><td>$ts</td><td>$region</td><td>$status</td><td>$rt</td></tr>"
+              done
+              echo "</table>"
+
+              echo "<h3>Latency by Region</h3>"
+              echo "<canvas id='latencyChart'></canvas>"
+              echo "<script>"
+              times=$(cut -d, -f2 summary/$name/monitor.csv | sed 's/^/\"/;s/$/\"/' | paste -sd, -)
+              asia=$(awk -F, '$3=="Asia Pacific"{print $5}' summary/$name/monitor.csv | paste -sd, -)
+              us=$(awk -F, '$3=="US East"{print $5}' summary/$name/monitor.csv | paste -sd, -)
+              uk=$(awk -F, '$3=="EU West"{print $5}' summary/$name/monitor.csv | paste -sd, -)
+
+              echo "new Chart(document.getElementById('latencyChart'), {
+                type:'line',
+                data:{
+                  labels:[$times],
+                  datasets:[
+                    {label:'Asia Pacific',data:[$asia],borderColor:'red',fill:false},
+                    {label:'US',data:[$us],borderColor:'blue',fill:false},
+                    {label:'UK',data:[$uk],borderColor:'green',fill:false}
+                  ]
+                }
+              });"
+              echo "</script>"
+            } > summary/$name/monitor.html
           done
 
+          # Build combined HTML
           {
-            echo "<h1>24h Monitor Summary Report</h1>"
+            echo "<h1>1 Hour Combined Summary Report</h1>"
             echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
 
-            echo "<h2>Monitor Results (Last 24h)</h2>"
+            echo "<h2>All Monitor Results (Last 1h)</h2>"
             echo "<table border=1><tr><th>Monitor</th><th>Timestamp</th><th>Region</th><th>Status</th><th>Response Time (ms)</th></tr>"
-            tail -n +2 summary/monitor.csv | while IFS=, read monitor ts region status rt; do
+            tail -n +2 summary/combined/monitor.csv | while IFS=, read monitor ts region status rt; do
               echo "<tr><td>$monitor</td><td>$ts</td><td>$region</td><td>$status</td><td>$rt</td></tr>"
             done
             echo "</table>"
-          } > summary/summary.html
+          } > summary/combined/summary.html
 
-      - name: Send Daily Report by Email
+      - name: Send Hourly Report by Email
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
           server_port: 587
           username: ${{ secrets.SMTP_USER }}
           password: ${{ secrets.SMTP_PASS }}
-          subject: "Daily Postman Monitor Summary Report"
+          subject: "Hourly Postman Monitor Summary Report"
           to: "team@example.com"
           from: "ci-bot@example.com"
-          body: "Attached is the 24h summary report for Postman Monitors."
-          attachments: summary/summary.html,summary/monitor.csv
+          body: |
+            Attached is the 1-hour summary report for Postman Monitors.
+            Includes combined report + per-monitor reports.
+          attachments: |
+            summary/combined/summary.html,
+            summary/combined/monitor.csv,
+            summary/current-weather/monitor.html,
+            summary/current-weather/monitor.csv,
+            summary/daily-forecast/monitor.html,
+            summary/daily-forecast/monitor.csv,
+            summary/historical-data/monitor.html,
+            summary/historical-data/monitor.csv
+
+      - name: Upload summary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hourly-summary
+          path: summary/
