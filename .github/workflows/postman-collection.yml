@@ -1,101 +1,179 @@
-name: Run 3 Postman collections + latency report from Newman
+name: Postman Collection Sync + Daily Monitor Summary
 
 on:
   push:
+    branches:
+      - main
+  schedule:
+    # Run daily summary at midnight UTC
+    - cron: "0 0 * * *"
   workflow_dispatch:
 
 jobs:
-  run-collections:
+  # ---------------------------
+  # 1. Sync collections on push
+  # ---------------------------
+  update-collections:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        suite:
-          - name: current-weather
-            collection: "Get Current Weather_A.postman_collection.json"
-            data:       "current_weather_cities.csv"
-          - name: daily-forecast
-            collection: "Get Daily Forecast- B.postman_collection.json"
-            data:       "Forecast_cities.csv"
-          - name: historical-data
-            collection: "Get Historical Data- C.postman_collection.json"
-            data:       "Historical_cities.csv"
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Node & Newman
+      - name: Update Current Weather Collection
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y nodejs npm jq
-          npm i -g newman newman-reporter-htmlextra
+          curl -s -X PUT "https://api.getpostman.com/collections/12345-current-weather-uid" \
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d @Get\ Current\ Weather_A.postman_collection.json \
+            -o response_current.json
+          cat response_current.json
 
-      - name: Run ${{ matrix.suite.name }} via Newman (HTML + JUnit + JSON)
+          curl -s -X POST "https://api.getpostman.com/monitors/45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f/run" \
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -o monitor_current.json
+          cat monitor_current.json
+
+      - name: Update Daily Forecast Collection
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
-          mkdir -p reports/${{ matrix.suite.name }}
-          newman run "${{ matrix.suite.collection }}" \
-            -d "${{ matrix.suite.data }}" \
-            --reporters cli,htmlextra,json,junit \
-            --reporter-htmlextra-export "reports/${{ matrix.suite.name }}/report.html" \
-            --reporter-json-export       "reports/${{ matrix.suite.name }}/report.json" \
-            --reporter-junit-export      "reports/${{ matrix.suite.name }}/report.junit.xml" \
-            --delay-request 250
+          curl -s -X PUT "https://api.getpostman.com/collections/12345-daily-forecast-uid" \
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d @Get\ Daily\ Forecast-\ B.postman_collection.json \
+            -o response_forecast.json
+          cat response_forecast.json
 
-      - name: Extract latency from Newman report.json
+          curl -s -X POST "https://api.getpostman.com/monitors/45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6/run" \
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -o monitor_forecast.json
+          cat monitor_forecast.json
+
+      - name: Update Historical Data Collection
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
-          json="reports/${{ matrix.suite.name }}/report.json"
+          curl -s -X PUT "https://api.getpostman.com/collections/12345-historical-data-uid" \
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d @Get\ Historical\ Data-\ C.postman_collection.json \
+            -o response_historical.json
+          cat response_historical.json
 
-          if [ -f "$json" ]; then
-            # Extract request names and response times
-            jq -r '.run.executions[] | [.item.name, .response.responseTime] | @csv' "$json" \
-              > "reports/${{ matrix.suite.name }}/latency.csv"
+          curl -s -X POST "https://api.getpostman.com/monitors/45974783-1f084d7b-f131-47e0-b084-7926fd355a25/run" \
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -o monitor_historical.json
+          cat monitor_historical.json
 
-            # Calculate overall average
-            avg=$(awk -F, '{sum+=$2; count++} END {if (count>0) print int(sum/count); else print 0}' "reports/${{ matrix.suite.name }}/latency.csv")
-            generated_at=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+  # ---------------------------
+  # 2. Daily summary job
+  # ---------------------------
+  daily-summary:
+    if: github.event.schedule == '0 0 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install jq
+        run: sudo apt-get update -y && sudo apt-get install -y jq
 
-            {
-              echo "<h1>Latency Report – ${{ matrix.suite.name }}</h1>"
-              echo "<p><i>Generated at: ${generated_at}</i></p>"
-              echo "<p><a href=\"report.html\">View Full Run Report</a></p>"
+      - name: Build 24h Monitor Summary with Charts
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          mkdir -p summary
 
-              # Table
-              echo "<table border=1>"
-              echo "<tr><th>Request</th><th>Latency (ms)</th></tr>"
-              tail -n +1 "reports/${{ matrix.suite.name }}/latency.csv" | while IFS=, read name latency; do
-                echo "<tr><td>$name</td><td>$latency</td></tr>"
-              done
-              echo "<tr><td><b>Overall Average</b></td><td><b>${avg}</b></td></tr>"
-              echo "</table>"
+          START=$(date -d "yesterday 00:00:00" +%s)
+          END=$(date -d "today 00:00:00" +%s)
 
-              # Chart.js bar graph
-              echo "<h2>Latency per Request</h2>"
-              echo "<canvas id='latencyChart' width='600' height='300'></canvas>"
-              echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
-              echo "<script>"
-              echo "const ctx = document.getElementById('latencyChart').getContext('2d');"
+          echo "monitor,timestamp,region,status,responseTime" > summary/monitor.csv
 
-              requests=$(cut -d, -f1 "reports/${{ matrix.suite.name }}/latency.csv" | sed 's/^/\"/;s/$/\"/' | paste -sd, -)
-              latencies=$(cut -d, -f2 "reports/${{ matrix.suite.name }}/latency.csv" | paste -sd, -)
+          # Collect results for all monitors
+          for uid in \
+            45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f \
+            45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6 \
+            45974783-1f084d7b-f131-47e0-b084-7926fd355a25
+          do
+            NAME=$(curl -s -H "X-Api-Key: $POSTMAN_API_KEY" \
+              "https://api.getpostman.com/monitors/$uid" | jq -r '.monitor.name')
 
-              echo "const data = {"
-              echo "  labels: [$requests],"
-              echo "  datasets: [{"
-              echo "    label: 'Latency (ms)',"
-              echo "    data: [${latencies}],"
-              echo "    backgroundColor: 'rgba(54, 162, 235, 0.6)'"
-              echo "  }]"
-              echo "};"
+            curl -s -H "X-Api-Key: $POSTMAN_API_KEY" \
+              "https://api.getpostman.com/monitors/$uid/results?since=$START&until=$END" \
+              -o summary/${uid}.json
 
-              echo "new Chart(ctx, {type: 'bar', data: data});"
-              echo "document.write('<p><b>Overall Avg Latency:</b> ${avg} ms</p>');"
-              echo "</script>"
-            } > "reports/${{ matrix.suite.name }}/latency.html"
-          else
-            echo "⚠️ No report.json found for ${{ matrix.suite.name }}" > "reports/${{ matrix.suite.name }}/latency.html"
-          fi
+            jq -r --arg NAME "$NAME" '.results[] | [$NAME, .timestamp, .region, .status, .run.info.responseTime] | @csv' summary/${uid}.json \
+              >> summary/monitor.csv
+          done
 
-      - name: Upload per-suite artifacts
+          # Build HTML report with charts
+          {
+            echo "<h1>24h Monitor Summary Report</h1>"
+            echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
+
+            # Table
+            echo "<h2>Monitor Results (Last 24h)</h2>"
+            echo "<table border=1><tr><th>Monitor</th><th>Timestamp</th><th>Region</th><th>Status</th><th>Response Time (ms)</th></tr>"
+            tail -n +2 summary/monitor.csv | while IFS=, read monitor ts region status rt; do
+              echo "<tr><td>$monitor</td><td>$ts</td><td>$region</td><td>$status</td><td>$rt</td></tr>"
+            done
+            echo "</table>"
+
+            # Multi-region Response Time Trend
+            echo "<h3>Response Times by Region</h3>"
+            echo "<canvas id='monitorLatencyChart'></canvas>"
+            echo "<script>"
+            times=$(cut -d, -f2 summary/monitor.csv | sed 's/^/\"/;s/$/\"/' | paste -sd, -)
+            asia=$(awk -F, '$3=="Asia Pacific"{print $5}' summary/monitor.csv | paste -sd, -)
+            us=$(awk -F, '$3=="US East"{print $5}' summary/monitor.csv | paste -sd, -)
+            uk=$(awk -F, '$3=="EU West"{print $5}' summary/monitor.csv | paste -sd, -)
+
+            echo "new Chart(document.getElementById('monitorLatencyChart'), {
+              type:'line',
+              data:{
+                labels:[$times],
+                datasets:[
+                  {label:'Asia Pacific',data:[$asia],borderColor:'red',fill:false},
+                  {label:'US',data:[$us],borderColor:'blue',fill:false},
+                  {label:'UK',data:[$uk],borderColor:'green',fill:false}
+                ]
+              }
+            });"
+            echo "</script>"
+
+            # Pass/Fail Trend
+            echo "<h3>Pass/Fail Trend</h3>"
+            echo "<canvas id='statusChart'></canvas>"
+            echo "<script>"
+            pass_count=$(grep -c "ok" summary/monitor.csv || true)
+            fail_count=$(grep -vc "ok" summary/monitor.csv || true)
+            echo "new Chart(document.getElementById('statusChart'), {
+              type:'bar',
+              data:{
+                labels:['Passed','Failed'],
+                datasets:[{
+                  data:[$pass_count,$fail_count],
+                  backgroundColor:['green','red']
+                }]
+              }
+            });"
+            echo "</script>"
+          } > summary/summary.html
+
+      - name: Send Daily Report by Email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          subject: "Daily Postman Monitor Summary Report"
+          to: "team@example.com"
+          from: "ci-bot@example.com"
+          body: "Attached is the 24h summary report for Postman Monitors (all scheduled runs)."
+          attachments: summary/summary.html,summary/monitor.csv
+
+      - name: Upload summary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: reports-${{ matrix.suite.name }}
-          path: reports/${{ matrix.suite.name }}
+          name: daily-summary
+          path: summary/
