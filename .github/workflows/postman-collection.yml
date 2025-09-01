@@ -67,55 +67,55 @@ jobs:
           path: reports/${{ matrix.suite.name }}
 
   aggregate:
-  needs: run-and-monitor
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/download-artifact@v4
-      with:
-        pattern: reports-*
-        merge-multiple: true
+    needs: run-and-monitor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: reports-*
+          merge-multiple: true
 
-    - name: Debug list reports
-      run: |
-        echo "Reports directory structure:"
-        ls -R reports || echo "No reports found"
+      - name: Debug list reports
+        run: |
+          echo "Reports directory structure:"
+          ls -R reports || echo "No reports found"
 
-    - name: Build combined summary.csv + index.html
-      run: |
-        echo "suite,iterations,assertions,failed" > summary.csv
-        for folder in reports/*; do
-          if [ -d "$folder" ]; then
-            name=$(basename "$folder")
-            json="$folder/report.json"
-            if [ -f "$json" ]; then
-              it=$(jq '.run.stats.iterations.total' "$json")
-              as=$(jq '.run.stats.assertions.total' "$json")
-              fl=$(jq '.run.stats.assertions.failed' "$json")
-              echo "$name,$it,$as,$fl" >> summary.csv
-            else
-              echo "⚠️ Skipping $name (no report.json found)"
+      - name: Build combined summary.csv + index.html
+        run: |
+          echo "suite,iterations,assertions,failed" > summary.csv
+          for folder in reports/*; do
+            if [ -d "$folder" ]; then
+              name=$(basename "$folder")
+              json="$folder/report.json"
+              if [ -f "$json" ]; then
+                it=$(jq '.run.stats.iterations.total' "$json")
+                as=$(jq '.run.stats.assertions.total' "$json")
+                fl=$(jq '.run.stats.assertions.failed' "$json")
+                echo "$name,$it,$as,$fl" >> summary.csv
+              else
+                echo "⚠️ Skipping $name (no report.json found)"
+              fi
             fi
-          fi
-        done
+          done
 
-        cat > index.html <<'HTML'
-        <h1>Combined Results</h1>
-        <ul>
-        HTML
+          cat > index.html <<'HTML'
+          <h1>Combined Results</h1>
+          <ul>
+          HTML
 
-        for folder in reports/*; do
-          if [ -d "$folder" ]; then
-            name=$(basename "$folder")
-            echo "<li><a href=\"$folder/report.html\">$name (HTML Report)</a></li>" >> index.html
-          fi
-        done
+          for folder in reports/*; do
+            if [ -d "$folder" ]; then
+              name=$(basename "$folder")
+              echo "<li><a href=\"$folder/report.html\">$name (HTML Report)</a></li>" >> index.html
+            fi
+          done
 
-        echo "</ul>" >> index.html
+          echo "</ul>" >> index.html
 
-        mkdir -p combined && mv summary.csv index.html combined/
+          mkdir -p combined && mv summary.csv index.html combined/
 
-    - name: Upload combined artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: combined
-        path: combined/
+      - name: Upload combined artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: combined
+          path: combined/
