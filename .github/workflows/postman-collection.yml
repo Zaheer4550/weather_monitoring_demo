@@ -5,14 +5,36 @@ on:
     branches:
       - main
   schedule:
-    # Run daily summary at midnight UTC
-    - cron: "0 0 * * *"
-  workflow_dispatch:
+    - cron: "0 0 * * *"   # daily summary
+  workflow_dispatch:       # allows manual trigger
 
 jobs:
-  # ---------------------------
-  # 1. Sync collections on push
-  # ---------------------------
+  # -----------------------------------
+  # 1. Test SMTP (manual trigger only)
+  # -----------------------------------
+  smtp-test:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Test Email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          subject: "SMTP Test Email from GitHub Actions"
+          to: "team@example.com"
+          from: "ci-bot@example.com"
+          body: |
+            Hello 👋
+
+            This is a test email from GitHub Actions.
+            If you are reading this, SMTP settings are working fine!
+
+  # -----------------------------------
+  # 2. Sync collections on push
+  # -----------------------------------
   update-collections:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -26,14 +48,10 @@ jobs:
           curl -s -X PUT "https://api.getpostman.com/collections/12345-current-weather-uid" \
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -H "Content-Type: application/json" \
-            -d @Get\ Current\ Weather_A.postman_collection.json \
-            -o response_current.json
-          cat response_current.json
+            -d @Get\ Current\ Weather_A.postman_collection.json
 
           curl -s -X POST "https://api.getpostman.com/monitors/45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f/run" \
-            -H "X-Api-Key: $POSTMAN_API_KEY" \
-            -o monitor_current.json
-          cat monitor_current.json
+            -H "X-Api-Key: $POSTMAN_API_KEY"
 
       - name: Update Daily Forecast Collection
         env:
@@ -42,14 +60,10 @@ jobs:
           curl -s -X PUT "https://api.getpostman.com/collections/12345-daily-forecast-uid" \
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -H "Content-Type: application/json" \
-            -d @Get\ Daily\ Forecast-\ B.postman_collection.json \
-            -o response_forecast.json
-          cat response_forecast.json
+            -d @Get\ Daily\ Forecast-\ B.postman_collection.json
 
           curl -s -X POST "https://api.getpostman.com/monitors/45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6/run" \
-            -H "X-Api-Key: $POSTMAN_API_KEY" \
-            -o monitor_forecast.json
-          cat monitor_forecast.json
+            -H "X-Api-Key: $POSTMAN_API_KEY"
 
       - name: Update Historical Data Collection
         env:
@@ -58,18 +72,14 @@ jobs:
           curl -s -X PUT "https://api.getpostman.com/collections/12345-historical-data-uid" \
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -H "Content-Type: application/json" \
-            -d @Get\ Historical\ Data-\ C.postman_collection.json \
-            -o response_historical.json
-          cat response_historical.json
+            -d @Get\ Historical\ Data-\ C.postman_collection.json
 
           curl -s -X POST "https://api.getpostman.com/monitors/45974783-1f084d7b-f131-47e0-b084-7926fd355a25/run" \
-            -H "X-Api-Key: $POSTMAN_API_KEY" \
-            -o monitor_historical.json
-          cat monitor_historical.json
+            -H "X-Api-Key: $POSTMAN_API_KEY"
 
-  # ---------------------------
-  # 2. Daily summary job
-  # ---------------------------
+  # -----------------------------------
+  # 3. Daily summary
+  # -----------------------------------
   daily-summary:
     if: github.event.schedule == '0 0 * * *'
     runs-on: ubuntu-latest
@@ -88,7 +98,6 @@ jobs:
 
           echo "monitor,timestamp,region,status,responseTime" > summary/monitor.csv
 
-          # Collect results for all monitors
           for uid in \
             45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f \
             45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6 \
@@ -105,58 +114,16 @@ jobs:
               >> summary/monitor.csv
           done
 
-          # Build HTML report with charts
           {
             echo "<h1>24h Monitor Summary Report</h1>"
             echo "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
 
-            # Table
             echo "<h2>Monitor Results (Last 24h)</h2>"
             echo "<table border=1><tr><th>Monitor</th><th>Timestamp</th><th>Region</th><th>Status</th><th>Response Time (ms)</th></tr>"
             tail -n +2 summary/monitor.csv | while IFS=, read monitor ts region status rt; do
               echo "<tr><td>$monitor</td><td>$ts</td><td>$region</td><td>$status</td><td>$rt</td></tr>"
             done
             echo "</table>"
-
-            # Multi-region Response Time Trend
-            echo "<h3>Response Times by Region</h3>"
-            echo "<canvas id='monitorLatencyChart'></canvas>"
-            echo "<script>"
-            times=$(cut -d, -f2 summary/monitor.csv | sed 's/^/\"/;s/$/\"/' | paste -sd, -)
-            asia=$(awk -F, '$3=="Asia Pacific"{print $5}' summary/monitor.csv | paste -sd, -)
-            us=$(awk -F, '$3=="US East"{print $5}' summary/monitor.csv | paste -sd, -)
-            uk=$(awk -F, '$3=="EU West"{print $5}' summary/monitor.csv | paste -sd, -)
-
-            echo "new Chart(document.getElementById('monitorLatencyChart'), {
-              type:'line',
-              data:{
-                labels:[$times],
-                datasets:[
-                  {label:'Asia Pacific',data:[$asia],borderColor:'red',fill:false},
-                  {label:'US',data:[$us],borderColor:'blue',fill:false},
-                  {label:'UK',data:[$uk],borderColor:'green',fill:false}
-                ]
-              }
-            });"
-            echo "</script>"
-
-            # Pass/Fail Trend
-            echo "<h3>Pass/Fail Trend</h3>"
-            echo "<canvas id='statusChart'></canvas>"
-            echo "<script>"
-            pass_count=$(grep -c "ok" summary/monitor.csv || true)
-            fail_count=$(grep -vc "ok" summary/monitor.csv || true)
-            echo "new Chart(document.getElementById('statusChart'), {
-              type:'bar',
-              data:{
-                labels:['Passed','Failed'],
-                datasets:[{
-                  data:[$pass_count,$fail_count],
-                  backgroundColor:['green','red']
-                }]
-              }
-            });"
-            echo "</script>"
           } > summary/summary.html
 
       - name: Send Daily Report by Email
@@ -169,11 +136,5 @@ jobs:
           subject: "Daily Postman Monitor Summary Report"
           to: "team@example.com"
           from: "ci-bot@example.com"
-          body: "Attached is the 24h summary report for Postman Monitors (all scheduled runs)."
+          body: "Attached is the 24h summary report for Postman Monitors."
           attachments: summary/summary.html,summary/monitor.csv
-
-      - name: Upload summary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: daily-summary
-          path: summary/
