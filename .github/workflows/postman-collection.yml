@@ -232,7 +232,7 @@ jobs:
           path: artifacts/
 
   # ---------------------------
-  # 2. Hourly summary job (unchanged from before)
+  # 2. Hourly summary job
   # ---------------------------
   hourly-summary:
     if: github.event.schedule == '0 * * * *' || github.event_name == 'workflow_dispatch'
@@ -311,4 +311,4 @@ jobs:
             } > summary/$name/monitor.html
           done
 
-      - name
+      -
