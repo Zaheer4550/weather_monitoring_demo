@@ -11,7 +11,7 @@ on:
 
 jobs:
   # ---------------------------
-  # 1. Sync collections on push + HTML report
+  # 1. Sync collections on push + HTML reports
   # ---------------------------
   update-collections:
     if: github.event_name == 'push'
@@ -21,6 +21,7 @@ jobs:
       - name: Install jq
         run: sudo apt-get update -y && sudo apt-get install -y jq
 
+      # --- Current Weather ---
       - name: Update Current Weather Collection & Trigger Monitor
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
@@ -36,7 +37,7 @@ jobs:
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -o artifacts/current-weather/monitor_trigger.json
 
-          echo "⏳ Waiting 30s for monitor run..."
+          echo "⏳ Waiting 30s for run..."
           sleep 30
           curl -s -H "X-Api-Key: $POSTMAN_API_KEY" \
             "https://api.getpostman.com/monitors/45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f/results/latest" \
@@ -88,8 +89,141 @@ jobs:
             echo "</table></body></html>"
           } > artifacts/current-weather/monitor.html
 
-      # Repeat same steps for Daily Forecast and Historical Data (same as above)
-      # ...
+      # --- Daily Forecast ---
+      - name: Update Daily Forecast Collection & Trigger Monitor
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          mkdir -p artifacts/daily-forecast
+          curl -s -X PUT "https://api.getpostman.com/collections/12345-daily-forecast-uid" \
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d @Get\ Daily\ Forecast-\ B.postman_collection.json \
+            -o artifacts/daily-forecast/collection_update.json
+
+          curl -s -X POST "https://api.getpostman.com/monitors/45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6/run" \
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -o artifacts/daily-forecast/monitor_trigger.json
+
+          echo "⏳ Waiting 30s for run..."
+          sleep 30
+          curl -s -H "X-Api-Key: $POSTMAN_API_KEY" \
+            "https://api.getpostman.com/monitors/45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6/results/latest" \
+            -o artifacts/daily-forecast/monitor_latest.json
+
+          echo "monitor,timestamp,status,responseTime" > artifacts/daily-forecast/monitor.csv
+          jq -r '.results[] | ["daily-forecast", .timestamp, .status, .run.info.responseTime] | @csv' artifacts/daily-forecast/monitor_latest.json \
+            >> artifacts/daily-forecast/monitor.csv
+
+          total=$(tail -n +2 artifacts/daily-forecast/monitor.csv | wc -l)
+          passed=$(grep -c "ok" artifacts/daily-forecast/monitor.csv || true)
+          failed=$((total - passed))
+          now=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          {
+            echo "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Monitor Report – daily-forecast</title>"
+            echo "<style>
+              body { font-family: Arial, sans-serif; margin: 20px; }
+              h1 { color: #333; }
+              .summary { display: flex; gap: 20px; margin-bottom: 20px; }
+              .card { padding: 15px; border-radius: 8px; color: white; font-weight: bold; min-width: 150px; text-align: center; }
+              .green { background-color: #28a745; }
+              .red { background-color: #dc3545; }
+              table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+              th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+              th { background-color: #f4f4f4; }
+              .fail { background-color: #f8d7da; }
+              .pass { background-color: #d4edda; }
+            </style></head><body>"
+
+            echo "<h1>Monitor Report – daily-forecast</h1>"
+            echo "<p><b>Generated:</b> $now | <b>Range:</b> Latest Run</p>"
+
+            echo "<div class='summary'>"
+            echo "<div class='card green'>Total Runs<br>$total</div>"
+            echo "<div class='card green'>Passed<br>$passed</div>"
+            echo "<div class='card red'>Failed<br>$failed</div>"
+            echo "</div>"
+
+            echo "<h2>Run Details</h2>"
+            echo "<table><tr><th>Timestamp</th><th>Status</th><th>Response Time (ms)</th></tr>"
+            tail -n +2 artifacts/daily-forecast/monitor.csv | while IFS=, read monitor ts status rt; do
+              if [[ $status == "ok" ]]; then
+                echo "<tr class='pass'><td>$ts</td><td>$status</td><td>$rt</td></tr>"
+              else
+                echo "<tr class='fail'><td>$ts</td><td>$status</td><td>$rt</td></tr>"
+              fi
+            done
+            echo "</table></body></html>"
+          } > artifacts/daily-forecast/monitor.html
+
+      # --- Historical Data ---
+      - name: Update Historical Data Collection & Trigger Monitor
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+        run: |
+          mkdir -p artifacts/historical-data
+          curl -s -X PUT "https://api.getpostman.com/collections/12345-historical-data-uid" \
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d @Get\ Historical\ Data-\ C.postman_collection.json \
+            -o artifacts/historical-data/collection_update.json
+
+          curl -s -X POST "https://api.getpostman.com/monitors/45974783-1f084d7b-f131-47e0-b084-7926fd355a25/run" \
+            -H "X-Api-Key: $POSTMAN_API_KEY" \
+            -o artifacts/historical-data/monitor_trigger.json
+
+          echo "⏳ Waiting 30s for run..."
+          sleep 30
+          curl -s -H "X-Api-Key: $POSTMAN_API_KEY" \
+            "https://api.getpostman.com/monitors/45974783-1f084d7b-f131-47e0-b084-7926fd355a25/results/latest" \
+            -o artifacts/historical-data/monitor_latest.json
+
+          echo "monitor,timestamp,status,responseTime" > artifacts/historical-data/monitor.csv
+          jq -r '.results[] | ["historical-data", .timestamp, .status, .run.info.responseTime] | @csv' artifacts/historical-data/monitor_latest.json \
+            >> artifacts/historical-data/monitor.csv
+
+          total=$(tail -n +2 artifacts/historical-data/monitor.csv | wc -l)
+          passed=$(grep -c "ok" artifacts/historical-data/monitor.csv || true)
+          failed=$((total - passed))
+          now=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          {
+            echo "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Monitor Report – historical-data</title>"
+            echo "<style>
+              body { font-family: Arial, sans-serif; margin: 20px; }
+              h1 { color: #333; }
+              .summary { display: flex; gap: 20px; margin-bottom: 20px; }
+              .card { padding: 15px; border-radius: 8px; color: white; font-weight: bold; min-width: 150px; text-align: center; }
+              .green { background-color: #28a745; }
+              .red { background-color: #dc3545; }
+              table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+              th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+              th { background-color: #f4f4f4; }
+              .fail { background-color: #f8d7da; }
+              .pass { background-color: #d4edda; }
+            </style></head><body>"
+
+            echo "<h1>Monitor Report – historical-data</h1>"
+            echo "<p><b>Generated:</b> $now | <b>Range:</b> Latest Run</p>"
+
+            echo "<div class='summary'>"
+            echo "<div class='card green'>Total Runs<br>$total</div>"
+            echo "<div class='card green'>Passed<br>$passed</div>"
+            echo "<div class='card red'>Failed<br>$failed</div>"
+            echo "</div>"
+
+            echo "<h2>Run Details</h2>"
+            echo "<table><tr><th>Timestamp</th><th>Status</th><th>Response Time (ms)</th></tr>"
+            tail -n +2 artifacts/historical-data/monitor.csv | while IFS=, read monitor ts status rt; do
+              if [[ $status == "ok" ]]; then
+                echo "<tr class='pass'><td>$ts</td><td>$status</td><td>$rt</td></tr>"
+              else
+                echo "<tr class='fail'><td>$ts</td><td>$status</td><td>$rt</td></tr>"
+              fi
+            done
+            echo "</table></body></html>"
+          } > artifacts/historical-data/monitor.html
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -98,7 +232,7 @@ jobs:
           path: artifacts/
 
   # ---------------------------
-  # 2. Hourly summary job (no changes)
+  # 2. Hourly summary job (unchanged from before)
   # ---------------------------
   hourly-summary:
     if: github.event.schedule == '0 * * * *' || github.event_name == 'workflow_dispatch'
@@ -177,24 +311,4 @@ jobs:
             } > summary/$name/monitor.html
           done
 
-      - name: Send Hourly Report by Email
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          username: ${{ secrets.SMTP_USER }}
-          password: ${{ secrets.SMTP_PASS }}
-          subject: "Hourly Postman Monitor Reports"
-          to: "team@example.com"
-          from: "ci-bot@example.com"
-          body: "Attached are the styled HTML reports for each monitor (last 1 hour)."
-          attachments: |
-            summary/current-weather/monitor.html,
-            summary/daily-forecast/monitor.html,
-            summary/historical-data/monitor.html
-
-      - name: Upload summary artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: hourly-summary
-          path: summary/
+      - name
