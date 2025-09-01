@@ -20,7 +20,7 @@
 							"const cw = (pm.response.json() || {}).current_weather || {};\r",
 							"console.log(`${city}: temp=${cw.temperature}°C, wind=${cw.windspeed} km/h, code=${cw.weathercode}`);\r",
 							"//Latency Check\r",
-							"pm.test(\"Latency Check- Response time is less than 1000ms\", function () {\r",
+							"pm.test(\"Latency Checkkkkk- Response time is less than 1000ms\", function () {\r",
 							"    pm.expect(pm.response.responseTime).to.be.below(1000);\r",
 							"});"
 						],
