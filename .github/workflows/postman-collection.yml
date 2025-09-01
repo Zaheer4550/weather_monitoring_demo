@@ -1,4 +1,4 @@
-name: Run 3 Postman collections + trigger monitors + latency summary
+name: Run 3 Postman collections + trigger monitors + latency summary (per monitor only)
 
 on:
   push:
@@ -58,103 +58,25 @@ jobs:
             -H "X-Api-Key: $POSTMAN_API_KEY" \
             -o "reports/${{ matrix.suite.name }}/monitor_latest.json"
 
+      - name: Extract latency for current run
+        run: |
+          json="reports/${{ matrix.suite.name }}/monitor_latest.json"
+          jq -r '[.monitor.name, .results[0].region, .results[0].timestamp, .results[0].run.info.responseTime] | @csv' \
+            "$json" > "reports/${{ matrix.suite.name }}/latency.csv"
+
+          {
+            echo "<h1>Latency Report – ${{ matrix.suite.name }}</h1>"
+            echo "<p><a href=\"report.html\">View Full Run Report</a></p>"
+            echo "<table border=1>"
+            echo "<tr><th>Monitor</th><th>Region</th><th>Timestamp</th><th>Latency (ms)</th></tr>"
+            tail -n +1 "reports/${{ matrix.suite.name }}/latency.csv" | while IFS=, read monitor region ts latency; do
+              echo "<tr><td>$monitor</td><td>$region</td><td>$ts</td><td>$latency</td></tr>"
+            done
+            echo "</table>"
+          } > "reports/${{ matrix.suite.name }}/latency.html"
+
       - name: Upload per-suite artifacts
         uses: actions/upload-artifact@v4
         with:
           name: reports-${{ matrix.suite.name }}
           path: reports/${{ matrix.suite.name }}
-
-  aggregate:
-    needs: run-and-monitor
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: reports-*
-          merge-multiple: true
-
-      - name: Debug downloaded files
-        run: |
-          echo "Files after artifact download:"
-          find reports -type f || echo "No files found"
-
-      - name: Build combined summary.csv + index.html
-        run: |
-          echo "suite,iterations,assertions,failed" > summary.csv
-
-          for n in current-weather daily-forecast historical-data; do
-            json="reports/$n/report.json"
-            if [ -f "$json" ]; then
-              it=$(jq '.run.stats.iterations.total' "$json")
-              as=$(jq '.run.stats.assertions.total' "$json")
-              fl=$(jq '.run.stats.assertions.failed' "$json")
-              echo "$n,$it,$as,$fl" >> summary.csv
-            else
-              echo "⚠️ $n has no report.json"
-            fi
-          done
-
-          echo "<h1>Combined Results</h1><ul>" > index.html
-          for n in current-weather daily-forecast historical-data; do
-            html="reports/$n/report.html"
-            if [ -f "$html" ]; then
-              echo "<li><a href=\"$html\">$n (HTML Report)</a></li>" >> index.html
-            else
-              echo "<li>$n — ⚠️ no HTML report found</li>" >> index.html
-            fi
-          done
-          echo "</ul>" >> index.html
-
-          mkdir -p combined && mv summary.csv index.html combined/
-
-      - name: Upload combined artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: combined
-          path: combined/
-
-  latency-summary:
-    needs: aggregate
-    runs-on: ubuntu-latest
-    steps:
-      - name: Fetch 24h latency results for all monitors
-        env:
-          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
-        run: |
-          mkdir -p latency
-          START=$(date -d "yesterday 00:00:00" +%s)
-          END=$(date -d "today 00:00:00" +%s)
-
-          echo "monitor,region,timestamp,avg_latency_ms" > latency/latency.csv
-
-          for uid in \
-            45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f \
-            45974783-1f084d6c-cd8b-4f70-a56c-2c989dd363c6 \
-            45974783-1f084d7b-f131-47e0-b084-7926fd355a25
-          do
-            NAME=$(curl -s -H "X-Api-Key: $POSTMAN_API_KEY" \
-              "https://api.getpostman.com/monitors/$uid" | jq -r '.monitor.name')
-
-            curl -s -H "X-Api-Key: $POSTMAN_API_KEY" \
-              "https://api.getpostman.com/monitors/$uid/results?since=$START&until=$END" \
-              -o latency/${uid}.json
-
-            jq -r --arg NAME "$NAME" '.results[] | [$NAME, .region, .timestamp, .run.info.responseTime] | @csv' latency/${uid}.json \
-              >> latency/latency.csv
-          done
-
-          # Build HTML table
-          {
-            echo "<h1>Latency Summary (24h)</h1><table border=1>"
-            echo "<tr><th>Monitor</th><th>Region</th><th>Timestamp</th><th>Avg Latency (ms)</th></tr>"
-            tail -n +2 latency/latency.csv | while IFS=, read monitor region ts latency; do
-              echo "<tr><td>$monitor</td><td>$region</td><td>$ts</td><td>$latency</td></tr>"
-            done
-            echo "</table>"
-          } > latency/latency.html
-
-      - name: Upload latency summary
-        uses: actions/upload-artifact@v4
-        with:
-          name: latency-summary
-          path: latency/
