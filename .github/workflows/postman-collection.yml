@@ -71,7 +71,7 @@ jobs:
           path: artifacts/
 
   # ---------------------------
-  # 2. Hourly summary job (styled per monitor)
+  # 2. Hourly summary job (styled per monitor, artifact only)
   # ---------------------------
   hourly-summary:
     if: github.event.schedule == '0 * * * *' || github.event_name == 'workflow_dispatch'
@@ -152,22 +152,6 @@ jobs:
               echo "</table></body></html>"
             } > summary/$name/monitor.html
           done
-
-      - name: Send Hourly Report by Email
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          username: ${{ secrets.SMTP_USER }}
-          password: ${{ secrets.SMTP_PASS }}
-          subject: "Hourly Postman Monitor Reports"
-          to: "team@example.com"
-          from: "ci-bot@example.com"
-          body: "Attached are the styled HTML reports for each monitor (last 1 hour)."
-          attachments: |
-            summary/current-weather/monitor.html,
-            summary/daily-forecast/monitor.html,
-            summary/historical-data/monitor.html
 
       - name: Upload summary artifacts
         uses: actions/upload-artifact@v4
