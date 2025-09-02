@@ -5,7 +5,7 @@ on:
     branches:
       - main
   schedule:
-    # Run summary every hour (UTC)
+    # Run summary every hour
     - cron: "0 * * * *"
   workflow_dispatch:
 
@@ -71,7 +71,7 @@ jobs:
           path: artifacts/
 
   # ---------------------------
-  # 2. Hourly summary job (styled per monitor + index.html, artifact only)
+  # 2. Hourly summary job (styled per monitor, artifact only)
   # ---------------------------
   hourly-summary:
     if: github.event.schedule == '0 * * * *' || github.event_name == 'workflow_dispatch'
@@ -80,7 +80,7 @@ jobs:
       - name: Install jq
         run: sudo apt-get update -y && sudo apt-get install -y jq
 
-      - name: Build 1h Monitor Reports (Styled + Index)
+      - name: Build 1h Monitor Reports (Styled)
         env:
           POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
         run: |
@@ -88,7 +88,6 @@ jobs:
 
           START=$(date -d "1 hour ago" +%s)
           END=$(date +%s)
-          now=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
           declare -A monitors=(
             ["current-weather"]="45974783-1f084d67-0b9f-4bf0-8be3-5f0db8c25a4f"
@@ -96,20 +95,14 @@ jobs:
             ["historical-data"]="45974783-1f084d7b-f131-47e0-b084-7926fd355a25"
           )
 
-          echo "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Hourly Monitor Reports</title></head><body>" > summary/index.html
-          echo "<h1>Hourly Monitor Reports</h1>" >> summary/index.html
-          echo "<p><b>Generated:</b> $now | <b>Range:</b> Last 1 Hour</p><ul>" >> summary/index.html
-
           for name in "${!monitors[@]}"; do
             uid=${monitors[$name]}
             mkdir -p summary/$name
 
-            # Fetch last 1h results
             curl -s -H "X-Api-Key: $POSTMAN_API_KEY" \
               "https://api.getpostman.com/monitors/$uid/results?since=$START&until=$END" \
               -o summary/$name/results.json
 
-            # Build CSV
             echo "monitor,timestamp,status,responseTime" > summary/$name/monitor.csv
             jq -r --arg NAME "$name" '.results[] | [$NAME, .timestamp, .status, .run.info.responseTime] | @csv' summary/$name/results.json \
               >> summary/$name/monitor.csv
@@ -118,65 +111,47 @@ jobs:
             passed=$(grep -c "ok" summary/$name/monitor.csv || true)
             failed=$((total - passed))
             skipped=0
+            now=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
-            echo "✅ Generating HTML for $name with $total runs"
+            {
+              echo "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Monitor Report – $name</title>"
+              echo "<style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                h1 { color: #333; }
+                .summary { display: flex; gap: 20px; margin-bottom: 20px; }
+                .card { padding: 15px; border-radius: 8px; color: white; font-weight: bold; min-width: 150px; text-align: center; }
+                .green { background-color: #28a745; }
+                .red { background-color: #dc3545; }
+                .yellow { background-color: #ffc107; color: black; }
+                table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+                th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+                th { background-color: #f4f4f4; }
+                .fail { background-color: #f8d7da; }
+                .pass { background-color: #d4edda; }
+              </style></head><body>"
 
-            # Build HTML
-cat > summary/$name/monitor.html <<'EOF'
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>Monitor Report – $name</title>
-<style>
-  body { font-family: Arial, sans-serif; margin: 20px; }
-  h1 { color: #333; }
-  .summary { display: flex; gap: 20px; margin-bottom: 20px; }
-  .card { padding: 15px; border-radius: 8px; color: white; font-weight: bold; min-width: 150px; text-align: center; }
-  .green { background-color: #28a745; }
-  .red { background-color: #dc3545; }
-  .yellow { background-color: #ffc107; color: black; }
-  table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-  th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
-  th { background-color: #f4f4f4; }
-  .fail { background-color: #f8d7da; }
-  .pass { background-color: #d4edda; }
-</style>
-</head>
-<body>
+              echo "<h1>Monitor Report – $name</h1>"
+              echo "<p><b>Generated:</b> $now | <b>Range:</b> Last 1 Hour</p>"
 
-<h1>Monitor Report – $name</h1>
-<p><b>Generated:</b> $now | <b>Range:</b> Last 1 Hour</p>
+              echo "<div class='summary'>"
+              echo "<div class='card green'>Total Runs<br>$total</div>"
+              echo "<div class='card green'>Passed<br>$passed</div>"
+              echo "<div class='card red'>Failed<br>$failed</div>"
+              echo "<div class='card yellow'>Skipped<br>$skipped</div>"
+              echo "</div>"
 
-<div class="summary">
-  <div class="card green">Total Runs<br>$total</div>
-  <div class="card green">Passed<br>$passed</div>
-  <div class="card red">Failed<br>$failed</div>
-  <div class="card yellow">Skipped<br>$skipped</div>
-</div>
-
-<h2>Run Details</h2>
-<table>
-<tr><th>Timestamp</th><th>Status</th><th>Response Time (ms)</th></tr>
-EOF
-
-            # Add table rows
-            tail -n +2 summary/$name/monitor.csv | while IFS=, read monitor ts status rt; do
-              if [[ $status == "ok" ]]; then
-                echo "<tr class='pass'><td>$ts</td><td>$status</td><td>$rt</td></tr>" >> summary/$name/monitor.html
-              else
-                echo "<tr class='fail'><td>$ts</td><td>$status</td><td>$rt</td></tr>" >> summary/$name/monitor.html
-              fi
-            done
-
-            # Close HTML
-            echo "</table></body></html>" >> summary/$name/monitor.html
-
-            # Add link to index.html
-            echo "<li><a href='$name/monitor.html'>$name</a></li>" >> summary/index.html
+              echo "<h2>Run Details</h2>"
+              echo "<table><tr><th>Timestamp</th><th>Status</th><th>Response Time (ms)</th></tr>"
+              tail -n +2 summary/$name/monitor.csv | while IFS=, read monitor ts status rt; do
+                if [[ $status == "ok" ]]; then
+                  echo "<tr class='pass'><td>$ts</td><td>$status</td><td>$rt</td></tr>"
+                else
+                  echo "<tr class='fail'><td>$ts</td><td>$status</td><td>$rt</td></tr>"
+                fi
+              done
+              echo "</table></body></html>"
+            } > summary/$name/monitor.html
           done
-
-          echo "</ul></body></html>" >> summary/index.html
 
       - name: Upload summary artifacts
         uses: actions/upload-artifact@v4
